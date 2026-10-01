@@ -1,0 +1,22 @@
+# Root Binaries
+/testcloud
+/testcloud.exe
+/testcloud-arm64
+/bin/
+
+# Node Runtime Data
+/data/
+/data-*/
+/test_cluster/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

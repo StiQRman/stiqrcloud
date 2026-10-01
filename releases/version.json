@@ -1,0 +1,18 @@
+[
+  {
+    "version": "v0.1.0",
+    "release_date": "2026-10-01T12:00:00Z",
+    "title": "Initial Alpha Release - Standalone & Reticulum Compatible",
+    "changelog": [
+      "Standalone-first local SQLite database with chunk storage",
+      "Reticulum Network Stack (RNS) packet and destination compatibility",
+      "Persistent invariant Data IDs across versions and node migrations",
+      "Distributed 3-Auditor + 3-Storage quorum with Merkle audits",
+      "Pluggable Bitcoin Lightning Network micropayments & Mock LN Sandbox",
+      "Local dark-mode dashboard with live telemetry and Settings Update Card"
+    ],
+    "download_url": "https://github.com/stiqrhub/testcloud/releases/tag/v0.1.0",
+    "checksum_sha": "99c9f52458448593b5efde40a7a7c3e7d81d4980890104f5f9362ff397a9a7f6",
+    "is_mandatory": false
+  }
+]

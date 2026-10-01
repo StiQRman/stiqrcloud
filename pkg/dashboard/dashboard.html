@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TestCloud Node Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --success: #238636;
+      --warning: #d29922;
+      --purple: #bc8cff;
+      --orange: #f0883e;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.5;
+      padding: 24px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand h1 { font-size: 1.5rem; font-weight: 600; color: #fff; }
+    .badge {
+      font-size: 0.75rem;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-primary { background: rgba(88, 166, 255, 0.2); color: var(--accent); border: 1px solid var(--accent); }
+    .badge-rns { background: rgba(188, 140, 255, 0.2); color: var(--purple); border: 1px solid var(--purple); }
+    .badge-success { background: rgba(35, 134, 54, 0.2); color: #3fb950; border: 1px solid #3fb950; }
+    .badge-warning { background: rgba(210, 153, 34, 0.2); color: var(--warning); border: 1px solid var(--warning); }
+    
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+    .nav-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 500;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+    .nav-btn.active {
+      color: #fff;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .card-title {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .card-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .card-sub { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; }
+    .table-container {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow-x: auto;
+      margin-bottom: 24px;
+    }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+    th {
+      padding: 12px 16px;
+      background: #21262d;
+      color: var(--text-muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    .mono { font-family: monospace; font-size: 0.85rem; }
+    
+    /* Settings Update Card (Strictly Mandated by Phase 4) */
+    .update-card {
+      border: 2px solid var(--accent);
+      background: linear-gradient(180deg, #161b22 0%, #1f242c 100%);
+      padding: 24px;
+      border-radius: 10px;
+      margin-bottom: 24px;
+    }
+    .update-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .update-btn {
+      background: var(--accent);
+      color: #0d1117;
+      border: none;
+      padding: 8px 18px;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: opacity 0.2s;
+    }
+    .update-btn:hover { opacity: 0.9; }
+    .changelog-list {
+      margin-top: 12px;
+      padding-left: 20px;
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+    .changelog-list li { margin-bottom: 6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <h1>TestCloud DB</h1>
+        <span class="badge badge-primary" id="version-tag">v0.1.0</span>
+        <span class="badge badge-rns" id="rns-badge">RNS: Connecting</span>
+      </div>
+      <div>
+        <span class="badge badge-success" id="mode-badge">Database-First</span>
+      </div>
+    </header>
+
+    <div class="nav-tabs">
+      <button class="nav-btn active" onclick="switchTab('explorer')">Database & Explorer</button>
+      <button class="nav-btn" onclick="switchTab('mesh')">P2P & Reticulum Mesh</button>
+      <button class="nav-btn" onclick="switchTab('audits')">Auditing & Lightning Escrow</button>
+      <button class="nav-btn" onclick="switchTab('settings')">Settings & Updates</button>
+    </div>
+
+    <!-- Explorer View -->
+    <div id="tab-explorer">
+      <div class="grid">
+        <div class="card">
+          <div class="card-title">Database Records</div>
+          <div class="card-value" id="stat-records">0</div>
+          <div class="card-sub">Invariant persistent primary keys</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Storage Disk Used</div>
+          <div class="card-value" id="stat-storage">0 KB</div>
+          <div class="card-sub">Content-addressed chunk files</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Active Mesh Mode</div>
+          <div class="card-value" id="stat-mode" style="font-size:1.2rem;">Standalone</div>
+          <div class="card-sub">Offline CRUD capable</div>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Invariant Data ID</th>
+              <th>Collection</th>
+              <th>Version</th>
+              <th>Owner Public Address</th>
+              <th>Permissions (ACL)</th>
+              <th>Merkle Root</th>
+              <th>Updated At</th>
+            </tr>
+          </thead>
+          <tbody id="records-table-body">
+            <tr><td colspan="7" style="text-align:center;color:var(--text-muted);">No records found. Create records via REST API or SDK.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Mesh View -->
+    <div id="tab-mesh" style="display:none;">
+      <div class="grid">
+        <div class="card">
+          <div class="card-title">Reticulum Destination</div>
+          <div class="card-value mono" id="rns-dest" style="font-size:1.1rem;word-break:break-all;">-</div>
+          <div class="card-sub">16-byte cryptographic RNS address</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Mesh Peers (75/25 Weighted)</div>
+          <div class="card-value" id="stat-peers">0</div>
+          <div class="card-sub">Auditors & Storage Nodes</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Peer Latency</div>
+          <div class="card-value" id="stat-latency">- ms</div>
+          <div class="card-sub">Network health average</div>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Node ID</th>
+              <th>Address / Reticulum</th>
+              <th>Type</th>
+              <th>Price (Sats/GB/Mo)</th>
+              <th>Audits Passed</th>
+              <th>Audits Performed</th>
+              <th>Latency</th>
+              <th>Social Score</th>
+            </tr>
+          </thead>
+          <tbody id="peers-table-body">
+            <tr><td colspan="8" style="text-align:center;color:var(--text-muted);">No peer nodes connected. Running in standalone local mode.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Audits View -->
+    <div id="tab-audits" style="display:none;">
+      <div class="grid">
+        <div class="card">
+          <div class="card-title">Contracts Handled</div>
+          <div class="card-value" id="stat-contracts">0</div>
+          <div class="card-sub">3-Auditor + 3-Storage Quorum</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Lightning Satoshis</div>
+          <div class="card-value" id="stat-sats">0 Sats</div>
+          <div class="card-sub">Accrued storage rent</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Merkle Audits Performed</div>
+          <div class="card-value" id="stat-audits">0</div>
+          <div class="card-sub">Proof-of-retrievability challenges</div>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Challenge ID</th>
+              <th>Storage Node</th>
+              <th>Result</th>
+              <th>Verification Time</th>
+              <th>Response Latency</th>
+              <th>Integrity Notes</th>
+            </tr>
+          </thead>
+          <tbody id="audits-table-body">
+            <tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No recent audit challenges.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Settings & Update Card View -->
+    <div id="tab-settings" style="display:none;">
+      <div class="update-card">
+        <div class="update-header">
+          <div>
+            <h2 style="color:#fff;font-size:1.3rem;">Software Updates & Release Channel</h2>
+            <p style="color:var(--text-muted);font-size:0.9rem;margin-top:4px;">
+              Integrated version manager adhering to Semantic Versioning (vMAJOR.MINOR.PATCH)
+            </p>
+          </div>
+          <button class="update-btn" onclick="checkUpdates()">Check for Updates</button>
+        </div>
+
+        <div style="background:#0d1117;padding:16px;border-radius:6px;border:1px solid var(--border);margin-top:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+            <div>
+              <span style="color:var(--text-muted);font-size:0.85rem;">INSTALLED VERSION:</span>
+              <span style="font-weight:700;color:#fff;margin-left:8px;" id="settings-cur-ver">v0.1.0</span>
+            </div>
+            <div>
+              <span style="color:var(--text-muted);font-size:0.85rem;">LATEST AVAILABLE:</span>
+              <span style="font-weight:700;color:var(--accent);margin-left:8px;" id="settings-latest-ver">Checking...</span>
+            </div>
+            <div>
+              <span class="badge badge-success" id="settings-status-badge">Up to Date</span>
+            </div>
+          </div>
+
+          <div style="margin-top:16px;">
+            <h3 style="font-size:1rem;color:#fff;margin-bottom:8px;">Current Release Highlights</h3>
+            <ul class="changelog-list" id="settings-changelog">
+              <li>Standalone-first local SQLite database with chunk storage</li>
+              <li>Reticulum Network Stack (RNS) packet and destination compatibility</li>
+              <li>Persistent invariant Data IDs across versions and node migrations</li>
+              <li>Distributed 3-Auditor + 3-Storage quorum with Merkle audits</li>
+              <li>Pluggable Bitcoin Lightning Network micropayments & Mock LN Sandbox</li>
+              <li>Local dark-mode dashboard with live telemetry and Settings Update Card</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tab) {
+      document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = 'none');
+      document.getElementById('tab-' + tab).style.display = 'block';
+      event.target.classList.add('active');
+    }
+
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/dashboard/stats');
+        const data = await res.json();
+
+        document.getElementById('version-tag').innerText = data.version;
+        document.getElementById('settings-cur-ver').innerText = data.version;
+        document.getElementById('stat-records').innerText = data.storage.record_count;
+        document.getElementById('stat-storage').innerText = (data.storage.used_bytes / 1024).toFixed(1) + ' KB';
+        document.getElementById('stat-mode').innerText = data.mode;
+        document.getElementById('mode-badge').innerText = data.is_public ? 'Public Gateway' : 'Private Node';
+        document.getElementById('rns-dest').innerText = data.reticulum_dest || 'Not configured';
+        document.getElementById('rns-badge').innerText = 'RNS: ' + (data.reticulum_dest ? 'Active' : 'Offline');
+        document.getElementById('stat-peers').innerText = data.peers_count;
+        document.getElementById('stat-contracts').innerText = data.contracts_count;
+        document.getElementById('stat-sats').innerText = data.total_sats_accrued + ' Sats';
+        document.getElementById('stat-audits').innerText = data.audit_count;
+
+        // Render records table
+        const recRes = await fetch('/api/dashboard/records');
+        const recData = await recRes.json();
+        if (recData.records && recData.records.length > 0) {
+          const tbody = document.getElementById('records-table-body');
+          tbody.innerHTML = recData.records.map(r => `
+            <tr>
+              <td class="mono" style="font-weight:600;color:var(--accent);">${r.data_id}</td>
+              <td>${r.collection}</td>
+              <td><span class="badge badge-primary">v${r.version}</span></td>
+              <td class="mono">${r.user_pub_address ? r.user_pub_address.substring(0,16)+'...' : 'Anonymous'}</td>
+              <td>${r.acl ? r.acl.length + ' Collaborators' : 'Owner Only'}</td>
+              <td class="mono">${r.merkle_root ? r.merkle_root.substring(0,12)+'...' : '-'}</td>
+              <td>${new Date(r.updated_at).toLocaleString()}</td>
+            </tr>
+          `).join('');
+        }
+
+        // Render peers
+        if (data.peers && data.peers.length > 0) {
+          const ptbody = document.getElementById('peers-table-body');
+          ptbody.innerHTML = data.peers.map(p => `
+            <tr>
+              <td class="mono">${p.node_id}</td>
+              <td class="mono">${p.public_addr || p.reticulum_dest || '-'}</td>
+              <td>${p.is_public ? '<span class="badge badge-primary">Public</span>' : '<span class="badge badge-warning">Private</span>'}</td>
+              <td>${p.price_per_gb_month} sats</td>
+              <td>${p.audits_passed}</td>
+              <td>${p.audits_performed}</td>
+              <td>${p.avg_latency_ms.toFixed(1)} ms</td>
+              <td><strong>${p.social_score.toFixed(1)}</strong></td>
+            </tr>
+          `).join('');
+        }
+      } catch (e) {
+        console.error('Failed to load stats:', e);
+      }
+    }
+
+    async function checkUpdates() {
+      try {
+        const res = await fetch('/api/dashboard/version');
+        const data = await res.json();
+        document.getElementById('settings-latest-ver').innerText = data.latest_version;
+        const badge = document.getElementById('settings-status-badge');
+        if (data.update_available) {
+          badge.className = 'badge badge-warning';
+          badge.innerText = 'Update Available';
+        } else {
+          badge.className = 'badge badge-success';
+          badge.innerText = 'Up to Date';
+        }
+      } catch (e) {
+        console.error('Failed to check updates:', e);
+      }
+    }
+
+    loadStats();
+    checkUpdates();
+    setInterval(loadStats, 5000);
+  </script>
+</body>
+</html>
