@@ -136,6 +136,12 @@
     - Node 6 (`127.10.6.1` on `127.10.6.0/24`) — Storage Node 3 (`node_storage_zeta`)
   - Automated cluster lifecycle scripts: [scripts/start_cluster.sh](scripts/start_cluster.sh) and [scripts/stop_cluster.sh](scripts/stop_cluster.sh).
   - Verified live 3-Auditor + 3-Storage quorum negotiation, automated chunk replication to designated storage peers, and universal `data_id` resolution across all 6 separate subnets.
+- **Phase 6: Reticulum BLE Bridge for Columba App (Completed & Active)**:
+  - Added Reticulum TCP Server listener with standard HDLC framing (`0x7E` flag, `0x7D` escape, `0x20` XOR mask) in [pkg/reticulum/reticulum.go](pkg/reticulum/reticulum.go).
+  - Deployed `torlando-tech/ble-reticulum` Protocol v2.2 interface into `~/.reticulum/interfaces/` with GATT service UUID `37145b00-442d-4a94-917f-8f42c5da28e3`.
+  - Configured `~/.reticulum/config` with dual-mode `BLEInterface` (peripheral advertising + central scanning) and `TCPClientInterface` bridging into Node 1 (`127.10.1.1:4242`).
+  - Implemented daemon management scripts: [scripts/start_ble_bridge.sh](scripts/start_ble_bridge.sh) and [scripts/stop_ble_bridge.sh](scripts/stop_ble_bridge.sh).
+  - Verified live Bluetooth LE advertising on host radio `F8:E4:E3:72:8E:85` and active TCP bridge into TestCloud.
 
 ## 4. Current State & Resume Guide for Next Session
 
