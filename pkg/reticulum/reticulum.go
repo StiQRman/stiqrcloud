@@ -165,26 +165,75 @@ func DecodePacket(data []byte) (*Packet, error) {
 	return p, nil
 }
 
-// InterfaceManager manages local Reticulum networking interfaces (UDP/TCP listener).
+// HDLC Framing Constants for Reticulum TCP / Serial Links
+const (
+	HDLCFlag    byte = 0x7E
+	HDLCEsc     byte = 0x7D
+	HDLCEscMask byte = 0x20
+)
+
+// EscapeHDLC escapes bytes for HDLC framing.
+func EscapeHDLC(data []byte) []byte {
+	buf := make([]byte, 0, len(data)+8)
+	for _, b := range data {
+		if b == HDLCEsc {
+			buf = append(buf, HDLCEsc, HDLCEsc^HDLCEscMask)
+		} else if b == HDLCFlag {
+			buf = append(buf, HDLCEsc, HDLCFlag^HDLCEscMask)
+		} else {
+			buf = append(buf, b)
+		}
+	}
+	return buf
+}
+
+// UnescapeHDLC decodes escaped HDLC bytes.
+func UnescapeHDLC(data []byte) []byte {
+	out := make([]byte, 0, len(data))
+	for i := 0; i < len(data); i++ {
+		if data[i] == HDLCEsc && i+1 < len(data) {
+			i++
+			out = append(out, data[i]^HDLCEscMask)
+		} else {
+			out = append(out, data[i])
+		}
+	}
+	return out
+}
+
+// FrameHDLC wraps a packet with HDLC start/end flags and escaped payload.
+func FrameHDLC(data []byte) []byte {
+	escaped := EscapeHDLC(data)
+	frame := make([]byte, 0, len(escaped)+2)
+	frame = append(frame, HDLCFlag)
+	frame = append(frame, escaped...)
+	frame = append(frame, HDLCFlag)
+	return frame
+}
+
+// InterfaceManager manages local Reticulum networking interfaces (UDP/TCP listeners).
 type InterfaceManager struct {
-	mu        sync.RWMutex
-	identity  *Identity
-	udpConn   *net.UDPConn
-	listening bool
-	peers     map[string]time.Time // destination hex -> last seen
-	onPacket  func(p *Packet, addr *net.UDPAddr)
+	mu          sync.RWMutex
+	identity    *Identity
+	udpConn     *net.UDPConn
+	tcpListener net.Listener
+	tcpClients  map[string]net.Conn
+	listening   bool
+	peers       map[string]time.Time // destination hex -> last seen
+	onPacket    func(p *Packet, addr net.Addr)
 }
 
 // NewInterfaceManager creates a Reticulum interface manager.
 func NewInterfaceManager(identity *Identity) *InterfaceManager {
 	return &InterfaceManager{
-		identity: identity,
-		peers:    make(map[string]time.Time),
+		identity:   identity,
+		peers:      make(map[string]time.Time),
+		tcpClients: make(map[string]net.Conn),
 	}
 }
 
 // SetPacketHandler registers a callback for received Reticulum packets.
-func (im *InterfaceManager) SetPacketHandler(fn func(p *Packet, addr *net.UDPAddr)) {
+func (im *InterfaceManager) SetPacketHandler(fn func(p *Packet, addr net.Addr)) {
 	im.mu.Lock()
 	defer im.mu.Unlock()
 	im.onPacket = fn
@@ -214,6 +263,98 @@ func (im *InterfaceManager) StartUDPAddr(host string, port int) error {
 
 	go im.readLoop()
 	return nil
+}
+
+// StartTCPAddr starts a Reticulum TCP server listener with HDLC framing (for Columba / TCPClientInterface).
+func (im *InterfaceManager) StartTCPAddr(host string, port int) error {
+	bindAddr := fmt.Sprintf("%s:%d", host, port)
+	l, err := net.Listen("tcp", bindAddr)
+	if err != nil {
+		return fmt.Errorf("failed to bind Reticulum TCP interface on %s: %w", bindAddr, err)
+	}
+
+	im.mu.Lock()
+	im.tcpListener = l
+	im.listening = true
+	im.mu.Unlock()
+
+	go im.acceptTCP(l)
+	return nil
+}
+
+func (im *InterfaceManager) acceptTCP(l net.Listener) {
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+
+		remote := conn.RemoteAddr().String()
+		im.mu.Lock()
+		im.tcpClients[remote] = conn
+		im.mu.Unlock()
+
+		// Send initial Announce frame over TCP to newly connected peer (e.g. Columba)
+		if im.identity != nil {
+			ann, err := im.identity.CreateAnnounce([]byte("testcloud.node"))
+			if err == nil {
+				annPacket := &Packet{
+					HeaderFlags: 0x00,
+					Hops:        0x00,
+					Destination: ann.Destination,
+					Context:     0x00,
+					Payload:     append(ann.Destination[:], ann.AppData...),
+				}
+				frame := FrameHDLC(EncodePacket(annPacket))
+				_, _ = conn.Write(frame)
+			}
+		}
+
+		go im.readTCP(conn, remote)
+	}
+}
+
+func (im *InterfaceManager) readTCP(conn net.Conn, remote string) {
+	defer func() {
+		_ = conn.Close()
+		im.mu.Lock()
+		delete(im.tcpClients, remote)
+		im.mu.Unlock()
+	}()
+
+	buf := make([]byte, 4096)
+	var frameBuf []byte
+	inFrame := false
+
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			return
+		}
+
+		for i := 0; i < n; i++ {
+			b := buf[i]
+			if b == HDLCFlag {
+				if inFrame && len(frameBuf) > 0 {
+					unescaped := UnescapeHDLC(frameBuf)
+					if p, err := DecodePacket(unescaped); err == nil {
+						im.mu.Lock()
+						im.peers[p.Destination.Hex()] = time.Now()
+						handler := im.onPacket
+						im.mu.Unlock()
+
+						if handler != nil {
+							go handler(p, conn.RemoteAddr())
+						}
+					}
+					frameBuf = frameBuf[:0]
+				}
+				inFrame = true
+			} else if inFrame {
+				frameBuf = append(frameBuf, b)
+			}
+		}
+	}
 }
 
 // SendPacket sends a Reticulum packet to target UDP address (host:port).
@@ -274,7 +415,7 @@ func (im *InterfaceManager) readLoop() {
 	}
 }
 
-// Stop gracefully shuts down the Reticulum interface.
+// Stop gracefully shuts down the Reticulum interfaces (UDP & TCP).
 func (im *InterfaceManager) Stop() {
 	im.mu.Lock()
 	defer im.mu.Unlock()
@@ -283,6 +424,14 @@ func (im *InterfaceManager) Stop() {
 		_ = im.udpConn.Close()
 		im.udpConn = nil
 	}
+	if im.tcpListener != nil {
+		_ = im.tcpListener.Close()
+		im.tcpListener = nil
+	}
+	for _, c := range im.tcpClients {
+		_ = c.Close()
+	}
+	im.tcpClients = make(map[string]net.Conn)
 }
 
 // GetPeersCount returns the number of active Reticulum peers seen.

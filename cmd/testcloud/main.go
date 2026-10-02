@@ -70,6 +70,9 @@ func main() {
 		if err := rnsManager.StartUDPAddr(*host, *rnsPort); err != nil {
 			log.Printf("Warning: Failed to bind Reticulum UDP interface on %s:%d: %v", *host, *rnsPort, err)
 		}
+		if err := rnsManager.StartTCPAddr(*host, *rnsPort); err != nil {
+			log.Printf("Warning: Failed to bind Reticulum TCP interface on %s:%d: %v", *host, *rnsPort, err)
+		}
 	}
 
 	// 3. Initialize Swarm, Escrow, and Auditor
@@ -104,7 +107,7 @@ func main() {
 	fmt.Printf(" Running Mode:        %s\n", getModeName(*standalone))
 	fmt.Printf(" HTTP & Dashboard:    http://%s:%d/dashboard\n", *host, *port)
 	fmt.Printf(" Public REST API:     http://%s:%d/api\n", *host, *port)
-	fmt.Printf(" Reticulum UDP:       %s:%d\n", *host, *rnsPort)
+	fmt.Printf(" Reticulum UDP & TCP: %s:%d\n", *host, *rnsPort)
 	fmt.Printf(" Reticulum RNS Dest:  %s\n", rnsDest)
 	fmt.Printf(" Storage Directory:   %s\n", absDataDir)
 	fmt.Printf(" Settings Updates:    %s\n", version.CurrentVersion)
