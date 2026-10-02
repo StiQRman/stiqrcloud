@@ -190,12 +190,21 @@ func (im *InterfaceManager) SetPacketHandler(fn func(p *Packet, addr *net.UDPAdd
 	im.onPacket = fn
 }
 
-// StartUDP starts listening on the specified UDP port for Reticulum packets.
+// StartUDP starts listening on the specified UDP port for Reticulum packets across all interfaces.
 func (im *InterfaceManager) StartUDP(port int) error {
-	addr := &net.UDPAddr{Port: port}
+	return im.StartUDPAddr("", port)
+}
+
+// StartUDPAddr starts listening on the specified host and port for Reticulum packets.
+func (im *InterfaceManager) StartUDPAddr(host string, port int) error {
+	var ip net.IP
+	if host != "" {
+		ip = net.ParseIP(host)
+	}
+	addr := &net.UDPAddr{IP: ip, Port: port}
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
-		return fmt.Errorf("failed to bind Reticulum UDP interface on port %d: %w", port, err)
+		return fmt.Errorf("failed to bind Reticulum UDP interface on %s:%d: %w", host, port, err)
 	}
 
 	im.mu.Lock()
@@ -205,6 +214,25 @@ func (im *InterfaceManager) StartUDP(port int) error {
 
 	go im.readLoop()
 	return nil
+}
+
+// SendPacket sends a Reticulum packet to target UDP address (host:port).
+func (im *InterfaceManager) SendPacket(targetAddr string, p *Packet) error {
+	im.mu.RLock()
+	conn := im.udpConn
+	im.mu.RUnlock()
+	if conn == nil {
+		return errors.New("UDP interface is not active")
+	}
+
+	rAddr, err := net.ResolveUDPAddr("udp", targetAddr)
+	if err != nil {
+		return err
+	}
+
+	data := EncodePacket(p)
+	_, err = conn.WriteToUDP(data, rAddr)
+	return err
 }
 
 func (im *InterfaceManager) readLoop() {

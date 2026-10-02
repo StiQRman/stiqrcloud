@@ -122,3 +122,17 @@
     - `testcloud-windows-amd64.exe` (Windows)
   - Generated and verified SHA-256 release checksums in [releases/version.json](releases/version.json).
   - Staged and GitHub/stiqrhub ready (local-first; no remote push executed without user approval).
+- **Phase 5: Multi-Network 6-Node Mesh Cluster (Completed & Verified)**:
+  - Extended CLI with `-host` and `-peers` flags supporting discrete network subnet binding and automated gossip bootstrapping.
+  - Implemented `/api/peers` endpoint for live routing table exchange and dynamic peer discovery.
+  - Implemented `/api/internal/store` endpoint for cross-node replication and chunk persistence.
+  - Extended Reticulum UDP interface manager with `StartUDPAddr` and `SendPacket` for multi-network packet transport.
+  - Deployed 6 independent nodes locally across 6 distinct IPv4 network subnets:
+    - Node 1 (`127.10.1.1` on `127.10.1.0/24`) — Entry Gateway & 1st Auditor (`node_auditor_alpha`)
+    - Node 2 (`127.10.2.1` on `127.10.2.0/24`) — Co-Auditor 1 (`node_auditor_beta`)
+    - Node 3 (`127.10.3.1` on `127.10.3.0/24`) — Co-Auditor 2 (`node_auditor_gamma`)
+    - Node 4 (`127.10.4.1` on `127.10.4.0/24`) — Storage Node 1 (`node_storage_delta`)
+    - Node 5 (`127.10.5.1` on `127.10.5.0/24`) — Storage Node 2 (`node_storage_epsilon`)
+    - Node 6 (`127.10.6.1` on `127.10.6.0/24`) — Storage Node 3 (`node_storage_zeta`)
+  - Automated cluster lifecycle scripts: [scripts/start_cluster.sh](scripts/start_cluster.sh) and [scripts/stop_cluster.sh](scripts/stop_cluster.sh).
+  - Verified live 3-Auditor + 3-Storage quorum negotiation, automated chunk replication to designated storage peers, and universal `data_id` resolution across all 6 separate subnets.

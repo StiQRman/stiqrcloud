@@ -77,6 +77,12 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/records/", s.handleRecordDetail)
 	s.mux.HandleFunc("/api/collections/", s.handleCollections)
 
+	// Mesh Peers & Discovery API
+	s.mux.HandleFunc("/api/peers", s.handlePeers)
+
+	// Internal Replication Storage
+	s.mux.HandleFunc("/api/internal/store", s.handleInternalStore)
+
 	// Dashboard Integration
 	dash := dashboard.NewServer(
 		s.nodeID,
@@ -117,6 +123,62 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	status := version.CheckUpdate()
 	_ = json.NewEncoder(w).Encode(status)
+}
+
+func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.swarm == nil {
+		_ = json.NewEncoder(w).Encode([]*p2p.Peer{})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		peers := s.swarm.ListPeers()
+		_ = json.NewEncoder(w).Encode(peers)
+
+	case http.MethodPost:
+		var p p2p.Peer
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, "invalid peer payload", http.StatusBadRequest)
+			return
+		}
+		if p.NodeID != "" && p.NodeID != s.nodeID {
+			s.swarm.RegisterPeer(&p)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "registered",
+			"node_id": p.NodeID,
+		})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleInternalStore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var rec storage.Record
+	if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+		http.Error(w, "invalid record payload", http.StatusBadRequest)
+		return
+	}
+
+	created, err := s.store.CreateRecord(&rec, nil, nil)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to store replicated record: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "stored",
+		"data_id": created.DataID,
+	})
 }
 
 func (s *Server) handleRecordsRoot(w http.ResponseWriter, r *http.Request) {

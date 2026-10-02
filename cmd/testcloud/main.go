@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/stiqrhub/testcloud/pkg/audit"
 	"github.com/stiqrhub/testcloud/pkg/escrow"
@@ -22,6 +24,7 @@ import (
 )
 
 func main() {
+	host := flag.String("host", "127.0.0.1", "Host IP to bind HTTP and Reticulum interfaces")
 	port := flag.Int("port", 8101, "Port for HTTP REST API and local Dashboard")
 	dataDir := flag.String("data-dir", "./data", "Local directory for database records and chunks")
 	standalone := flag.Bool("standalone", false, "Run in pure standalone database mode (offline/local only)")
@@ -29,6 +32,7 @@ func main() {
 	isPublic := flag.Bool("public", false, "Expose node as a public gateway")
 	rnsPort := flag.Int("rns-port", 4242, "Reticulum UDP interface port")
 	price := flag.Int64("price", 100, "Price per GB per month in sats")
+	peers := flag.String("peers", "", "Comma-separated list of peer bootstrap URLs (e.g. http://127.10.1.1:8101)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
 
@@ -63,11 +67,13 @@ func main() {
 
 	rnsManager := reticulum.NewInterfaceManager(rnsIdentity)
 	if !*standalone {
-		_ = rnsManager.StartUDP(*rnsPort)
+		if err := rnsManager.StartUDPAddr(*host, *rnsPort); err != nil {
+			log.Printf("Warning: Failed to bind Reticulum UDP interface on %s:%d: %v", *host, *rnsPort, err)
+		}
 	}
 
 	// 3. Initialize Swarm, Escrow, and Auditor
-	listenAddr := fmt.Sprintf("http://127.0.0.1:%d", *port)
+	listenAddr := fmt.Sprintf("http://%s:%d", *host, *port)
 	swarm := p2p.NewSwarm(*nodeID, listenAddr, store)
 	escrowMgr := escrow.NewManager(*nodeID, *price)
 	auditorCoord := audit.NewCoordinator(*nodeID, store, escrowMgr, swarm)
@@ -86,7 +92,7 @@ func main() {
 	})
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", *port),
+		Addr:    fmt.Sprintf("%s:%d", *host, *port),
 		Handler: gw.Handler(),
 	}
 
@@ -96,8 +102,9 @@ func main() {
 	fmt.Println("======================================================================")
 	fmt.Printf(" Node ID:             %s\n", *nodeID)
 	fmt.Printf(" Running Mode:        %s\n", getModeName(*standalone))
-	fmt.Printf(" HTTP & Dashboard:    http://127.0.0.1:%d/dashboard\n", *port)
-	fmt.Printf(" Public REST API:     http://127.0.0.1:%d/api\n", *port)
+	fmt.Printf(" HTTP & Dashboard:    http://%s:%d/dashboard\n", *host, *port)
+	fmt.Printf(" Public REST API:     http://%s:%d/api\n", *host, *port)
+	fmt.Printf(" Reticulum UDP:       %s:%d\n", *host, *rnsPort)
 	fmt.Printf(" Reticulum RNS Dest:  %s\n", rnsDest)
 	fmt.Printf(" Storage Directory:   %s\n", absDataDir)
 	fmt.Printf(" Settings Updates:    %s\n", version.CurrentVersion)
@@ -112,6 +119,24 @@ func main() {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()
+
+	// Connect to bootstrap peers
+	if *peers != "" && !*standalone {
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			peerList := strings.Split(*peers, ",")
+			for _, pURL := range peerList {
+				pURL = strings.TrimSpace(pURL)
+				if pURL != "" && pURL != listenAddr {
+					if err := swarm.ConnectPeer(pURL, rnsDest, *isPublic, *price); err != nil {
+						log.Printf("[%s] Notice: Connecting to peer %s: %v", *nodeID, pURL, err)
+					} else {
+						log.Printf("[%s] Successfully peered with %s", *nodeID, pURL)
+					}
+				}
+			}
+		}()
+	}
 
 	<-sigChan
 	fmt.Println("\nShutting down TestCloud node gracefully...")

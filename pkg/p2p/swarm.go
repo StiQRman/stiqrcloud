@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -312,5 +313,71 @@ func (s *Swarm) BroadcastRecord(rec *storage.Record, storagePeers []string, chun
 			}
 		}(peer.PublicAddr)
 	}
+	return nil
+}
+
+// ConnectPeer contacts a remote peer, announces the local node, and learns peers.
+func (s *Swarm) ConnectPeer(peerURL string, rnsDest string, isPublic bool, price int64) error {
+	peerURL = strings.TrimRight(peerURL, "/")
+	// 1. Fetch remote node info
+	start := time.Now()
+	resp, err := s.httpClient.Get(fmt.Sprintf("%s/api/health", peerURL))
+	if err != nil {
+		return fmt.Errorf("failed to contact peer at %s: %w", peerURL, err)
+	}
+	defer resp.Body.Close()
+	latencyMs := float64(time.Since(start).Milliseconds())
+
+	var health struct {
+		NodeID   string `json:"node_id"`
+		RNSDest  string `json:"rns_dest"`
+		IsPublic bool   `json:"is_public"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		return fmt.Errorf("failed to parse health from %s: %w", peerURL, err)
+	}
+
+	// Register remote peer in local swarm
+	if health.NodeID != "" && health.NodeID != s.localID {
+		s.RegisterPeer(&Peer{
+			NodeID:          health.NodeID,
+			PublicAddr:      peerURL,
+			ReticulumDest:   health.RNSDest,
+			IsPublic:        health.IsPublic,
+			PricePerGBMonth: 100,
+			AvgLatencyMs:    latencyMs,
+			LastSeen:        time.Now().UTC(),
+		})
+	}
+
+	// 2. Announce local node to remote peer
+	selfPeer := &Peer{
+		NodeID:          s.localID,
+		PublicAddr:      s.localAddr,
+		ReticulumDest:   rnsDest,
+		IsPublic:        isPublic,
+		PricePerGBMonth: price,
+		LastSeen:        time.Now().UTC(),
+	}
+	selfPayload, _ := json.Marshal(selfPeer)
+	annResp, err := s.httpClient.Post(fmt.Sprintf("%s/api/peers", peerURL), "application/json", bytes.NewReader(selfPayload))
+	if err == nil {
+		_ = annResp.Body.Close()
+	}
+
+	// 3. Query remote peer's routing table to discover other mesh nodes
+	peersResp, err := s.httpClient.Get(fmt.Sprintf("%s/api/peers", peerURL))
+	if err == nil {
+		defer peersResp.Body.Close()
+		var knownPeers []*Peer
+		if err := json.NewDecoder(peersResp.Body).Decode(&knownPeers); err == nil {
+			for _, kp := range knownPeers {
+				if kp.NodeID != s.localID {
+					s.RegisterPeer(kp)
+				}
+			}
+		}
+	}
+
 	return nil
 }
