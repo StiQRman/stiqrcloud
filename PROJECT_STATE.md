@@ -136,3 +136,47 @@
     - Node 6 (`127.10.6.1` on `127.10.6.0/24`) — Storage Node 3 (`node_storage_zeta`)
   - Automated cluster lifecycle scripts: [scripts/start_cluster.sh](scripts/start_cluster.sh) and [scripts/stop_cluster.sh](scripts/stop_cluster.sh).
   - Verified live 3-Auditor + 3-Storage quorum negotiation, automated chunk replication to designated storage peers, and universal `data_id` resolution across all 6 separate subnets.
+
+## 4. Current State & Resume Guide for Next Session
+
+### Current Running Services
+- A **6-node mesh network** is active locally across 6 separate subnets (`127.10.1.0/24` - `127.10.6.0/24`):
+  - **Node 1 (Auditor 1)**: `127.10.1.1:8101` — Gateway / Ingress ([Dashboard](http://127.10.1.1:8101/dashboard))
+  - **Node 2 (Auditor 2)**: `127.10.2.1:8101` — Co-Auditor ([Dashboard](http://127.10.2.1:8101/dashboard))
+  - **Node 3 (Auditor 3)**: `127.10.3.1:8101` — Co-Auditor ([Dashboard](http://127.10.3.1:8101/dashboard))
+  - **Node 4 (Storage 1)**: `127.10.4.1:8101` — Storage Peer ([Dashboard](http://127.10.4.1:8101/dashboard))
+  - **Node 5 (Storage 2)**: `127.10.5.1:8101` — Storage Peer ([Dashboard](http://127.10.5.1:8101/dashboard))
+  - **Node 6 (Storage 3)**: `127.10.6.1:8101` — Storage Peer ([Dashboard](http://127.10.6.1:8101/dashboard))
+- Cluster control scripts:
+  - Stop cluster: `./scripts/stop_cluster.sh`
+  - Start cluster: `./scripts/start_cluster.sh`
+
+### Ingested & Verified Data Records
+1. **Record 1 (Telemetry)**:
+   - Data ID: `rec_26b1c8324e4a1764b070875c_56724` (Collection: `telemetry`)
+   - Revision: Updated to `v2` in-place while keeping `data_id` permanent.
+   - Quorum: 1st Auditor `node_auditor_alpha`, Co-Auditors `gamma` & `zeta`, Storage peers `beta`, `delta`, `epsilon`.
+   - Invoice: `lnbc10u1pa4f3132bf51e6792bf26`.
+2. **Record 2 (Flight Log Attachment)**:
+   - Data ID: `rec_0eaa67360f534521bffe7509_81485` (Collection: `flight_logs`)
+   - Attachment: [testdata/sample_flight_data.csv](testdata/sample_flight_data.csv) (282 bytes).
+   - Content Hash: `3332beed125225eec51ddc57dd1f02fd5908264165d0c038d98a30c8a3b83c85`.
+   - Invoice: `lnbc10u1p2b6b7bf2236985a2a794`.
+   - Download Endpoint: `/api/records/rec_0eaa67360f534521bffe7509_81485/file`.
+
+### Verified Invariant Data Guarantees
+- **Data ID Invariance**: Data ID never mutates upon record editing or storage peer migration.
+- **Universal Cross-Subnet Proxying**: Every node across all 6 networks successfully resolved and returned records by `data_id`.
+- **Reticulum Compatibility**: Destination addresses `<hex>` assigned, packet framing verified, UDP interface listening on port 4242 per subnet.
+
+### Planned Next Steps for Tomorrow
+1. **Client SDK Implementation**:
+   - Implement Flutter/Dart SDK in `sdk/dart` with client-side keypair generation, AES-256-GCM encryption, Wrapped DEK handling, and REST/SSE communication.
+   - Alternatively implement TypeScript/JavaScript SDK in `sdk/ts`.
+2. **Interactive Escrow Settlement & Audit Challenge Loop**:
+   - Settle mock Lightning invoices via webhook / API call.
+   - Trigger automated periodic Merkle audits against storage peers and log reputation score bumps on the dashboard.
+3. **Private Node NAT Traversal**:
+   - WebSocket reverse relay tunneling (`/ws/relay`) for nodes behind strict firewalls / residential NAT.
+4. **Remote Staging / Publication**:
+   - When authorized by user, push repository to GitHub / stiqrhub with tagged release `v0.1.0`.
