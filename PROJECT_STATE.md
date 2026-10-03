@@ -169,20 +169,90 @@
    - Content Hash: `3332beed125225eec51ddc57dd1f02fd5908264165d0c038d98a30c8a3b83c85`.
    - Invoice: `lnbc10u1p2b6b7bf2236985a2a794`.
    - Download Endpoint: `/api/records/rec_0eaa67360f534521bffe7509_81485/file`.
+3. **Record 3 (Columba / Reticulum BLE Gateway)**:
+   - Collection: `columba_messages`
+   - Ingress Path: Phone (Seth's S22) -> Bluetooth Low Energy (BLE) GATT -> Reticulum `ble-reticulum` -> Python Shared Instance -> [scripts/lxmf_testcloud_bot.py](scripts/lxmf_testcloud_bot.py) -> REST API (`127.10.1.1:8101`) -> 6-Node Distributed Cluster.
+
+### Bluetooth Low Energy (BLE) & LXMF Gateway Architecture
+- **Bluetooth Stack**: Native Reticulum BLE Interface (`ble-reticulum` with `bleak`, `bluezero`, `dbus-fast`).
+- **GATT Service UUID**: `37145b00-442d-4a94-917f-8f42c5da28e3`
+- **Bridge Script**: [scripts/start_ble_bridge.sh](scripts/start_ble_bridge.sh)
+- **LXMF Gateway Bot**: [scripts/lxmf_testcloud_bot.py](scripts/lxmf_testcloud_bot.py)
+  - Destination Hash: `<0b0208f35b36830c10b635af6f063bf4>`
+  - Display Name: `TestCloud Gateway`
+  - Re-announces every 20 seconds over BLE mesh.
+  - Automatically stores received messages into collection `columba_messages` and replies with a cluster receipt ACK over Reticulum.
+
+### Client SDK Implementation (Dart & Flutter)
+- **Path**: [sdk/dart](sdk/dart)
+- **Status**: Completed, tested, and verified against live 6-node cluster (11/11 tests passing).
+- **Core Modules**:
+  - **`TestCloudCrypto`** ([sdk/dart/lib/src/crypto.dart](sdk/dart/lib/src/crypto.dart)):
+    - Ed25519 keypair generation, public address derivation (`user_pub_address`), and cryptographic signing/verification.
+    - AES-256-GCM symmetric authenticated encryption for text and binary file/picture blobs.
+    - Auto-generation of 256-bit DEKs (Data Encryption Keys).
+    - Envelope serialization format: `tc:enc:v1:<base64-json>`.
+  - **`TestCloudClient`** ([sdk/dart/lib/src/client.dart](sdk/dart/lib/src/client.dart)):
+    - `getHealth()` & `getVersion()`
+    - `createRecord()` with client-side Zero-Knowledge encryption and multipart file/picture upload.
+    - `getRecord()` with automatic in-place decryption via DEK.
+    - `listRecords()`, `downloadFile()`, `downloadPicture()`, `listPeers()`, and `pollRecords()`.
+  - **Example**: [sdk/dart/example/main.dart](sdk/dart/example/main.dart) runnable via `dart run example/main.dart`.
+  - **Documentation**: [sdk/dart/README.md](sdk/dart/README.md).
+
+### Storage Monetization, Whitelist & Grace Retention Eviction Policy
+- **Dynamic Pricing Controls**:
+  - **Free For Everyone Toggle**: When enabled, all incoming storage contracts are automatically granted at 0 sats and marked settled with `FREE_STORAGE_AGREEMENT`.
+  - **Configurable Rate**: Operators can set their price per GB per month in satoshis (saved to `data/pricing_policy.json`).
+  - **Free Whitelist**: Designated public addresses (`user_pub_address` or Reticulum hashes) are permanently exempted from storage charges, even when paid mode is active.
+- **Zero-Immediate-Deletion Grace Retention Policy**:
+  - When a storage contract's period expires or a client stops paying, the node **never automatically deletes the data**. Data remains preserved, readable, and queryable in grace retention.
+  - **Full-Disk Priority Eviction**:
+    - If and when the node's local disk quota (`max_bytes`) is reached, the storage engine identifies expired/unpaid contracts and sorts them by expiration timestamp (oldest expired contracts pruned first).
+    - Data chunks belonging to expired contracts are evicted until sufficient space is freed for new contracts.
+    - Active paid contracts and whitelisted/free contracts are strictly protected and never evicted.
+- **Dashboard UI**:
+  - Updated "Auditing & Lightning Escrow" tab with real-time toggle switches, price editors, interactive whitelist pill management (add/remove), and visual capacity breakdown meter (Active Paid vs Grace Retention vs Available Headroom).
 
 ### Verified Invariant Data Guarantees
 - **Data ID Invariance**: Data ID never mutates upon record editing or storage peer migration.
 - **Universal Cross-Subnet Proxying**: Every node across all 6 networks successfully resolved and returned records by `data_id`.
-- **Reticulum Compatibility**: Destination addresses `<hex>` assigned, packet framing verified, UDP interface listening on port 4242 per subnet.
+- **Reticulum Compatibility**: Destination addresses `<hex>` assigned, packet framing verified, UDP/TCP HDLC framing active on port 4242 per subnet.
+
+### Node Failure & Self-Healing Resilience Verification (Delta Node Knock-Offline Test)
+- **Scenario Tested**: Intentionally knocked storage node `node_storage_delta` (`127.10.4.1:8101`) offline to observe network reaction, challenge failure detection, automated peer failover, and data survivability.
+- **Observations & Results**:
+  1. **Failure Detection**: The background 3-Auditor verification cycle immediately flagged `node_storage_delta` with connection refused (`passed: false`, notes: `Storage node offline: dial tcp 127.10.4.1:8101: connect: connection refused`).
+  2. **Automated Self-Healing Replication**:
+     - The coordinator (`pkg/audit/auditor.go`) triggered `TriggerSelfHealingReplication`.
+     - Automatically selected an unassigned, healthy peer (`node_auditor_beta`) from the swarm using the 75/25 reputation algorithm.
+     - Escrow manager immediately reallocated unaccrued payout streams from Delta to Beta (`ReallocateOfflineNode`).
+     - Storage peer list dynamically updated from `["node_storage_zeta", "node_storage_delta", "node_storage_epsilon"]` to `["node_storage_zeta", "node_auditor_beta", "node_storage_epsilon"]`.
+     - Updated record was automatically broadcast and synced to the new peer.
+  3. **Permanent Invariant Data ID**:
+     - `data_id` (`rec_b5b51e1d1fe93562beaac716_31031`) and `merkle_root` remained 100% constant and invariant throughout the failover.
+     - Universal Content Routing continued to resolve and return the record seamlessly across all surviving subnets (`127.10.1.1`, `127.10.2.1`, `127.10.3.1`, `127.10.5.1`, `127.10.6.1`).
+  4. **Subsequent Audit Recovery**: The next audit cycle challenged the newly self-healed quorum (`zeta`, `beta`, `epsilon`), with all 6 challenges passing and latency recorded at <1ms.
+  5. **Dashboard Visualization & Peer Liveness Probing**:
+     - Added background peer liveness probing loop (`StartLivenessLoop` in [`pkg/p2p/swarm.go`](pkg/p2p/swarm.go)) checking node health every 4 seconds.
+     - Dead nodes are immediately flagged with `is_online: false`, slashed in social score, and excluded from new storage quorum allocations.
+     - Added dedicated **Status** column in the **P2P & Reticulum Mesh** table:
+       - Online peers display `🟢 ONLINE`.
+       - Dead/disconnected peers (Delta) sink to the bottom with an explicit **`🔴 OFFLINE`** badge, red row highlight, and `Unreachable` latency.
+     - Mesh Peers summary card updated to display `4 / 5 Online`.
+     - Database Explorer table now displays active **Storage Quorum** badges for each record, showing that Delta was replaced by Beta on the records.
+  6. **Recursive P2P Gossip Peer Discovery (StiQRcloud Alignment)**:
+     - Implemented `GossipPeers()` in [`pkg/p2p/swarm.go`](pkg/p2p/swarm.go): nodes periodically exchange full peer routing tables across bootstrap nodes and discovered peers.
+     - When any node joins via a bootstrap node (e.g. Node 1 Alpha), it recursively discovers all other peers on the mesh, connects to them directly, and registers bidirectional announcements via `POST /api/peers`.
+     - Verified across all nodes (`Beta`, `Gamma`, `Delta`, `Epsilon`, `Zeta`): every dashboard displays the entire 6-node network with live status indicators, even if nodes only booted with a single bootstrap peer flag.
 
 ### Planned Next Steps for Tomorrow
-1. **Client SDK Implementation**:
-   - Implement Flutter/Dart SDK in `sdk/dart` with client-side keypair generation, AES-256-GCM encryption, Wrapped DEK handling, and REST/SSE communication.
-   - Alternatively implement TypeScript/JavaScript SDK in `sdk/ts`.
-2. **Interactive Escrow Settlement & Audit Challenge Loop**:
+1. **Interactive Escrow Settlement & Audit Challenge Loop**:
    - Settle mock Lightning invoices via webhook / API call.
    - Trigger automated periodic Merkle audits against storage peers and log reputation score bumps on the dashboard.
-3. **Private Node NAT Traversal**:
+2. **Private Node NAT Traversal**:
    - WebSocket reverse relay tunneling (`/ws/relay`) for nodes behind strict firewalls / residential NAT.
+3. **TypeScript / JavaScript Client SDK**:
+   - Port SDK conventions to `sdk/ts` for web browser frontends and Node.js.
 4. **Remote Staging / Publication**:
    - When authorized by user, push repository to GitHub / stiqrhub with tagged release `v0.1.0`.

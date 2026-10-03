@@ -37,7 +37,7 @@ func TestAuditorChallengeVerificationAndFailover(t *testing.T) {
 		StoragePeers:  []string{"storage_node_a", "storage_node_b", "storage_node_c"},
 	}
 
-	contract, _ := escrowMgr.CreateContract(rec.DataID, 1024*1024, 1, map[string]int64{
+	contract, _ := escrowMgr.CreateContract(rec.DataID, "owner_test_pub", 1024*1024, 1, map[string]int64{
 		"storage_node_a": 100,
 		"storage_node_b": 100,
 		"storage_node_c": 100,

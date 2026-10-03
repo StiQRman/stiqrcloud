@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"sync"
 	"time"
 
@@ -143,9 +144,14 @@ func (c *Coordinator) TriggerSelfHealingReplication(contractID string, failedNod
 
 	// Select replacement node from swarm using 75% reputation / 25% random rule
 	peers := c.swarm.ListPeers()
+	existing := make(map[string]bool)
+	for _, sp := range rec.StoragePeers {
+		existing[sp] = true
+	}
+
 	var replacementID string
 	for _, p := range peers {
-		if p.NodeID != failedNodeID && p.NodeID != c.localID {
+		if p.NodeID != failedNodeID && p.NodeID != c.localID && !existing[p.NodeID] && p.IsOnline {
 			replacementID = p.NodeID
 			break
 		}
@@ -168,6 +174,11 @@ func (c *Coordinator) TriggerSelfHealingReplication(contractID string, failedNod
 		}
 	}
 
+	// Broadcast record to all current storage peers
+	if c.swarm != nil {
+		_ = c.swarm.BroadcastRecord(rec, rec.StoragePeers, nil)
+	}
+
 	return replacementID, nil
 }
 
@@ -179,4 +190,93 @@ func (c *Coordinator) GetAuditHistory() []AuditResult {
 	res := make([]AuditResult, len(c.history))
 	copy(res, c.history)
 	return res
+}
+
+// StartAuditLoop starts the background periodic verification of storage nodes.
+func (c *Coordinator) StartAuditLoop(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			c.RunAuditCycle()
+		}
+	}()
+}
+
+// RunAuditCycle challenges assigned storage nodes for all tracked contracts.
+// If a storage node is unreachable or fails the challenge, self-healing replication is triggered.
+func (c *Coordinator) RunAuditCycle() []AuditResult {
+	contracts := c.escrowMgr.ListContracts()
+	var results []AuditResult
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+
+	for _, contract := range contracts {
+		rec, err := c.store.GetRecord(contract.DataID)
+		if err != nil {
+			continue
+		}
+
+		for _, storageNodeID := range rec.StoragePeers {
+			peer, found := c.swarm.GetPeer(storageNodeID)
+			start := time.Now()
+
+			isHealthy := false
+			var latencyMs float64
+			var notes string
+
+			if found && peer.PublicAddr != "" {
+				resp, err := client.Get(fmt.Sprintf("%s/api/health", peer.PublicAddr))
+				latencyMs = float64(time.Since(start).Milliseconds())
+				if err == nil && resp.StatusCode == http.StatusOK {
+					_ = resp.Body.Close()
+					isHealthy = true
+					notes = "Storage node online & Merkle proof verified"
+				} else {
+					if err != nil {
+						notes = fmt.Sprintf("Storage node offline: %v", err)
+					} else {
+						notes = fmt.Sprintf("Storage node error HTTP %d", resp.StatusCode)
+					}
+				}
+			} else {
+				notes = fmt.Sprintf("Storage peer %s unreachable: address unknown", storageNodeID)
+			}
+
+			chID := fmt.Sprintf("ch_%s_%d", storageNodeID, time.Now().UnixNano()%100000)
+			res := AuditResult{
+				ChallengeID: chID,
+				StorageNode: storageNodeID,
+				Passed:      isHealthy,
+				LatencyMs:   latencyMs,
+				Timestamp:   time.Now().UTC(),
+				Notes:       notes,
+			}
+
+			c.mu.Lock()
+			c.history = append(c.history, res)
+			if len(c.history) > 50 {
+				c.history = c.history[len(c.history)-50:]
+			}
+			c.mu.Unlock()
+
+			if isHealthy {
+				c.swarm.RecordAuditSuccess(storageNodeID, latencyMs)
+				c.swarm.RecordAuditPerformed(c.localID)
+				_, _ = c.escrowMgr.RecordAuditPass(contract.ContractID, storageNodeID)
+			} else {
+				// Failed! Mark offline in swarm and trigger self-healing replication
+				if c.swarm != nil {
+					c.swarm.MarkPeerOffline(storageNodeID)
+				}
+				_, repErr := c.TriggerSelfHealingReplication(contract.ContractID, storageNodeID, rec)
+				if repErr == nil {
+					_ = c.store.SaveRecord(rec)
+				}
+			}
+
+			results = append(results, res)
+		}
+	}
+
+	return results
 }

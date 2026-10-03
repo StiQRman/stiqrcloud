@@ -24,8 +24,9 @@ import (
 )
 
 func main() {
-	host := flag.String("host", "127.0.0.1", "Host IP to bind HTTP and Reticulum interfaces")
-	port := flag.Int("port", 8101, "Port for HTTP REST API and local Dashboard")
+	host := flag.String("host", "0.0.0.0", "Host IP to bind HTTP and Reticulum interfaces")
+	port := flag.Int("port", 8100, "Port for HTTP REST API and Dashboard")
+	dashPort := flag.Int("dashboard-port", 8101, "Secondary port for Dashboard (if different from port)")
 	dataDir := flag.String("data-dir", "./data", "Local directory for database records and chunks")
 	standalone := flag.Bool("standalone", false, "Run in pure standalone database mode (offline/local only)")
 	nodeID := flag.String("node-id", "", "Custom node identifier (auto-generated if empty)")
@@ -34,6 +35,14 @@ func main() {
 	price := flag.Int64("price", 100, "Price per GB per month in sats")
 	peers := flag.String("peers", "", "Comma-separated list of peer bootstrap URLs (e.g. http://127.10.1.1:8101)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
+
+	// Compatibility flags for StiQRcloud drop-in replacement
+	name := flag.String("name", "Node Operator", "Operator display nickname")
+	_ = flag.String("location", "Home Network", "Operator geographic location")
+	publicAddr := flag.String("public-addr", "", "Public reachable IP and port for P2P traffic")
+	gatewayURL := flag.String("gateway-url", "", "Public HTTP/HTTPS Gateway URL for mobile apps")
+	_ = flag.String("discovery-url", "", "Public internet discovery URL")
+	_ = flag.Int("p2p-port", 9100, "P2P swarm communication port")
 	flag.Parse()
 
 	if *showVersion {
@@ -42,9 +51,13 @@ func main() {
 	}
 
 	if *nodeID == "" {
-		b := make([]byte, 6)
-		_, _ = rand.Read(b)
-		*nodeID = "node_" + hex.EncodeToString(b)
+		if *name != "" && *name != "Node Operator" {
+			*nodeID = strings.ToLower(strings.ReplaceAll(*name, " ", "_"))
+		} else {
+			b := make([]byte, 6)
+			_, _ = rand.Read(b)
+			*nodeID = "node_" + hex.EncodeToString(b)
+		}
 	}
 
 	absDataDir, err := filepath.Abs(*dataDir)
@@ -77,11 +90,32 @@ func main() {
 
 	// 3. Initialize Swarm, Escrow, and Auditor
 	listenAddr := fmt.Sprintf("http://%s:%d", *host, *port)
+	if *gatewayURL != "" {
+		listenAddr = strings.TrimRight(*gatewayURL, "/")
+	} else if *publicAddr != "" {
+		listenAddr = strings.TrimRight(*publicAddr, "/")
+	}
 	swarm := p2p.NewSwarm(*nodeID, listenAddr, store)
-	escrowMgr := escrow.NewManager(*nodeID, *price)
+	swarm.SetIdentity(rnsDest, *isPublic, *price)
+	if *peers != "" && !*standalone {
+		for _, pURL := range strings.Split(*peers, ",") {
+			pURL = strings.TrimSpace(pURL)
+			if pURL != "" && pURL != listenAddr {
+				swarm.AddBootstrapPeer(pURL)
+			}
+		}
+	}
+	escrowMgr := escrow.NewManager(*nodeID, *price, absDataDir)
 	auditorCoord := audit.NewCoordinator(*nodeID, store, escrowMgr, swarm)
 
 	// 4. Initialize Gateway & Dashboard Server
+	if !*standalone {
+		swarm.StartLivenessLoop(3 * time.Second)
+	}
+	if *isPublic && !*standalone {
+		auditorCoord.StartAuditLoop(6 * time.Second)
+	}
+
 	gw := gateway.NewServer(gateway.Config{
 		NodeID:     *nodeID,
 		Store:      store,
@@ -119,9 +153,23 @@ func main() {
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
+			log.Fatalf("Server error on %d: %v", *port, err)
 		}
 	}()
+
+	// Secondary listener on dashboard-port if specified and distinct from port
+	var dashServer *http.Server
+	if *dashPort > 0 && *dashPort != *port {
+		dashServer = &http.Server{
+			Addr:    fmt.Sprintf("%s:%d", *host, *dashPort),
+			Handler: gw.Handler(),
+		}
+		go func() {
+			if err := dashServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("Notice: Dashboard server on %d: %v", *dashPort, err)
+			}
+		}()
+	}
 
 	// Connect to bootstrap peers
 	if *peers != "" && !*standalone {
@@ -145,6 +193,9 @@ func main() {
 	fmt.Println("\nShutting down TestCloud node gracefully...")
 	rnsManager.Stop()
 	_ = server.Close()
+	if dashServer != nil {
+		_ = dashServer.Close()
+	}
 	fmt.Println("Shutdown complete.")
 }
 

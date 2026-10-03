@@ -45,6 +45,10 @@ echo "Starting Node 1 (Auditor 1) on 127.10.1.1:8101 (RNS: 4242)..."
 PIDS+=($!)
 sleep 0.3
 
+# Start localhost proxy so http://localhost:8101/dashboard works in any browser
+python3 "$BASE_DIR/scripts/localhost_proxy.py" > "$LOG_ROOT/proxy.log" 2>&1 &
+PIDS+=($!)
+
 # Node 2: Co-Auditor 1 (Network 127.10.2.0/24)
 echo "Starting Node 2 (Auditor 2) on 127.10.2.1:8101 (RNS: 4242)..."
 "$BIN" \

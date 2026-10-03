@@ -8,6 +8,7 @@
     :root {
       --bg: #0d1117;
       --card-bg: #161b22;
+      --card-hover: #1f242c;
       --border: #30363d;
       --accent: #58a6ff;
       --success: #238636;
@@ -118,7 +119,150 @@
     tr:last-child td { border-bottom: none; }
     .mono { font-family: monospace; font-size: 0.85rem; }
     
-    /* Settings Update Card (Strictly Mandated by Phase 4) */
+    /* Policy & Config Cards */
+    .policy-box {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .policy-box h3 {
+      font-size: 1.1rem;
+      color: #fff;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .policy-box p {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+    .form-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .form-label {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text);
+      min-width: 140px;
+    }
+    .form-input {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+    }
+    .form-input:focus { border-color: var(--accent); }
+    .btn {
+      background: var(--accent);
+      color: #0d1117;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn-secondary {
+      background: #21262d;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: #30363d; }
+    
+    /* Toggle switch */
+    .switch-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #30363d;
+      transition: .3s;
+      border-radius: 24px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+    input:checked + .slider { background-color: #3fb950; }
+    input:checked + .slider:before { transform: translateX(20px); }
+    
+    /* Whitelist pills */
+    .pill-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .whitelist-pill {
+      background: #21262d;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 0.85rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pill-remove {
+      background: none;
+      border: none;
+      color: #f85149;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+    }
+    .pill-remove:hover { color: #ff7b72; }
+
+    /* Capacity Progress Bar */
+    .capacity-bar {
+      height: 14px;
+      background: #21262d;
+      border-radius: 7px;
+      overflow: hidden;
+      display: flex;
+      margin: 12px 0;
+      border: 1px solid var(--border);
+    }
+    .cap-active { background: #3fb950; }
+    .cap-grace { background: #d29922; }
+    .cap-free { background: #30363d; }
+
+    /* Settings Update Card */
     .update-card {
       border: 2px solid var(--accent);
       background: linear-gradient(180deg, #161b22 0%, #1f242c 100%);
@@ -134,18 +278,6 @@
       flex-wrap: wrap;
       gap: 10px;
     }
-    .update-btn {
-      background: var(--accent);
-      color: #0d1117;
-      border: none;
-      padding: 8px 18px;
-      border-radius: 6px;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 0.9rem;
-      transition: opacity 0.2s;
-    }
-    .update-btn:hover { opacity: 0.9; }
     .changelog-list {
       margin-top: 12px;
       padding-left: 20px;
@@ -203,13 +335,14 @@
               <th>Collection</th>
               <th>Version</th>
               <th>Owner Public Address</th>
+              <th>Storage Quorum</th>
               <th>Permissions (ACL)</th>
               <th>Merkle Root</th>
               <th>Updated At</th>
             </tr>
           </thead>
           <tbody id="records-table-body">
-            <tr><td colspan="7" style="text-align:center;color:var(--text-muted);">No records found. Create records via REST API or SDK.</td></tr>
+            <tr><td colspan="8" style="text-align:center;color:var(--text-muted);">No records found. Create records via REST API, SDK, or Bluetooth.</td></tr>
           </tbody>
         </table>
       </div>
@@ -239,6 +372,7 @@
         <table>
           <thead>
             <tr>
+              <th>Status</th>
               <th>Node ID</th>
               <th>Address / Reticulum</th>
               <th>Type</th>
@@ -250,13 +384,13 @@
             </tr>
           </thead>
           <tbody id="peers-table-body">
-            <tr><td colspan="8" style="text-align:center;color:var(--text-muted);">No peer nodes connected. Running in standalone local mode.</td></tr>
+            <tr><td colspan="9" style="text-align:center;color:var(--text-muted);">No peer nodes connected. Running in standalone local mode.</td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <!-- Audits View -->
+    <!-- Audits & Lightning Escrow View -->
     <div id="tab-audits" style="display:none;">
       <div class="grid">
         <div class="card">
@@ -276,6 +410,81 @@
         </div>
       </div>
 
+      <!-- Storage Monetization & Free Controls -->
+      <div class="policy-box">
+        <h3>⚡ Storage Monetization & Free Tiers</h3>
+        <p>Control whether your node charges clients in Lightning satoshis or offers free decentralized hosting.</p>
+        
+        <div class="form-row">
+          <label class="form-label">Storage Pricing:</label>
+          <label class="switch-wrap">
+            <span class="switch">
+              <input type="checkbox" id="pricing-free-toggle" onchange="toggleFreeForAll(this.checked)">
+              <span class="slider"></span>
+            </span>
+            <span id="pricing-toggle-label" style="font-weight:600;color:#fff;">Charging Lightning Sats</span>
+          </label>
+        </div>
+
+        <div class="form-row" id="price-input-row">
+          <label class="form-label" for="price-per-gb">Price per GB/Month:</label>
+          <input type="number" id="price-per-gb" class="form-input" style="width:120px;" min="1" value="100">
+          <span style="color:var(--text-muted);font-size:0.9rem;">Sats</span>
+          <button class="btn btn-secondary" onclick="updatePrice()">Save Price</button>
+        </div>
+
+        <div style="margin-top:12px;" id="pricing-status-callout">
+          <span class="badge badge-warning" id="pricing-status-badge">⚡ Paid Storage Active</span>
+        </div>
+      </div>
+
+      <!-- Free Whitelist Management -->
+      <div class="policy-box">
+        <h3>🏷️ Free Storage Whitelist</h3>
+        <p>Public addresses listed here receive <strong>100% free storage</strong> on this node, even when paid mode is turned on. Add your apps, friends, emergency mesh keys, or Reticulum identities.</p>
+
+        <div class="form-row">
+          <input type="text" id="whitelist-address-input" class="form-input mono" placeholder="Enter user_pub_address or Reticulum hash..." style="flex:1;min-width:280px;">
+          <button class="btn" onclick="addWhitelistAddress()">+ Add to Whitelist</button>
+        </div>
+
+        <div class="pill-list" id="whitelist-pills">
+          <span style="color:var(--text-muted);font-size:0.85rem;" id="whitelist-empty-msg">No addresses whitelisted yet.</span>
+        </div>
+      </div>
+
+      <!-- Retention & Eviction Policy -->
+      <div class="policy-box">
+        <h3>📦 Grace Retention & Eviction Policy</h3>
+        <p style="margin-bottom:8px;">
+          <strong>Zero Immediate Deletions Guarantee:</strong> When a storage contract expires or a client stops paying, this node will <strong>never automatically delete the data</strong>. It remains preserved and served in grace retention. If node storage reaches maximum quota, the <strong>oldest expired contracts are evicted first</strong> to make room for incoming contracts.
+        </p>
+
+        <!-- Capacity Visual Breakdown -->
+        <div style="display:flex;justify-content:space-between;font-size:0.85rem;color:var(--text-muted);margin-top:16px;">
+          <span>🟢 Active Paid: <strong id="bar-active-text" style="color:#fff;">0 MB</strong></span>
+          <span>🟡 Grace Retention (Expired/Unpaid): <strong id="bar-grace-text" style="color:var(--warning);">0 MB</strong> (<span id="grace-count-text">0</span> preserved)</span>
+          <span>⚪ Total Quota: <strong id="bar-total-text" style="color:#fff;">50 GB</strong></span>
+        </div>
+        <div class="capacity-bar">
+          <div class="cap-active" id="cap-active-bar" style="width: 1%;"></div>
+          <div class="cap-grace" id="cap-grace-bar" style="width: 0%;"></div>
+          <div class="cap-free" style="flex:1;"></div>
+        </div>
+
+        <div class="form-row" style="margin-top:16px;">
+          <label class="form-label" for="quota-input-gb">Max Storage Quota:</label>
+          <input type="number" id="quota-input-gb" class="form-input" style="width:100px;" min="1" value="50">
+          <span style="color:var(--text-muted);font-size:0.9rem;">GB</span>
+          <button class="btn btn-secondary" onclick="updateQuota()">Save Quota</button>
+        </div>
+      </div>
+
+      <!-- Recent Audits Table -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;margin-top:20px;">
+        <h3 style="font-size:1.1rem;color:#fff;">Recent Merkle Audits & Verification Challenges</h3>
+        <button class="btn btn-secondary" onclick="triggerAudit()">⚡ Run Audit Challenge Now</button>
+      </div>
       <div class="table-container">
         <table>
           <thead>
@@ -305,7 +514,7 @@
               Integrated version manager adhering to Semantic Versioning (vMAJOR.MINOR.PATCH)
             </p>
           </div>
-          <button class="update-btn" onclick="checkUpdates()">Check for Updates</button>
+          <button class="btn" onclick="checkUpdates()">Check for Updates</button>
         </div>
 
         <div style="background:#0d1117;padding:16px;border-radius:6px;border:1px solid var(--border);margin-top:16px;">
@@ -328,10 +537,11 @@
             <ul class="changelog-list" id="settings-changelog">
               <li>Standalone-first local SQLite database with chunk storage</li>
               <li>Reticulum Network Stack (RNS) packet and destination compatibility</li>
-              <li>Persistent invariant Data IDs across versions and node migrations</li>
+              <li>Storage monetization controls: Free for everyone toggle & sats/GB/month pricing</li>
+              <li>Free Whitelist: Permanent fee exemption for designated client public keys</li>
+              <li>Grace retention policy: Expired contracts kept safe until storage quota full</li>
               <li>Distributed 3-Auditor + 3-Storage quorum with Merkle audits</li>
               <li>Pluggable Bitcoin Lightning Network micropayments & Mock LN Sandbox</li>
-              <li>Local dark-mode dashboard with live telemetry and Settings Update Card</li>
             </ul>
           </div>
         </div>
@@ -340,6 +550,8 @@
   </div>
 
   <script>
+    let currentPolicy = { free_for_all: false, price_per_gb_month: 100, free_whitelist: [] };
+
     function switchTab(tab) {
       document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
       document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = 'none');
@@ -360,47 +572,225 @@
         document.getElementById('mode-badge').innerText = data.is_public ? 'Public Gateway' : 'Private Node';
         document.getElementById('rns-dest').innerText = data.reticulum_dest || 'Not configured';
         document.getElementById('rns-badge').innerText = 'RNS: ' + (data.reticulum_dest ? 'Active' : 'Offline');
-        document.getElementById('stat-peers').innerText = data.peers_count;
+        const onlineCount = data.online_peers_count !== undefined ? data.online_peers_count : data.peers_count;
+        document.getElementById('stat-peers').innerHTML = `${onlineCount} <span style="font-size:0.9rem;font-weight:normal;color:var(--text-muted);">/ ${data.peers_count} Online</span>`;
         document.getElementById('stat-contracts').innerText = data.contracts_count;
         document.getElementById('stat-sats').innerText = data.total_sats_accrued + ' Sats';
         document.getElementById('stat-audits').innerText = data.audit_count;
+
+        // Pricing Policy UI
+        if (data.pricing_policy) {
+          currentPolicy = data.pricing_policy;
+          const toggle = document.getElementById('pricing-free-toggle');
+          toggle.checked = currentPolicy.free_for_all;
+          const label = document.getElementById('pricing-toggle-label');
+          const badge = document.getElementById('pricing-status-badge');
+          const priceRow = document.getElementById('price-input-row');
+
+          if (currentPolicy.free_for_all) {
+            label.innerText = 'Free for Everyone';
+            badge.className = 'badge badge-success';
+            badge.innerText = '🟢 Free Community Hosting (0 Sats Charged)';
+            priceRow.style.opacity = '0.4';
+          } else {
+            label.innerText = 'Charging Lightning Sats';
+            badge.className = 'badge badge-warning';
+            badge.innerText = `⚡ Paid Storage (${currentPolicy.price_per_gb_month} sats / GB / mo)`;
+            priceRow.style.opacity = '1.0';
+          }
+          document.getElementById('price-per-gb').value = currentPolicy.price_per_gb_month;
+
+          // Whitelist pills
+          renderWhitelistPills(currentPolicy.free_whitelist || []);
+        }
+
+        // Storage & Retention Breakdown
+        if (data.storage) {
+          const maxGb = (data.storage.max_bytes / (1024 * 1024 * 1024)).toFixed(1);
+          document.getElementById('quota-input-gb').value = Math.round(data.storage.max_bytes / (1024 * 1024 * 1024)) || 50;
+          document.getElementById('bar-total-text').innerText = maxGb + ' GB';
+
+          const activeKb = (data.storage.active_bytes / 1024).toFixed(1);
+          document.getElementById('bar-active-text').innerText = activeKb + ' KB';
+
+          const graceKb = (data.storage.grace_bytes / 1024).toFixed(1);
+          document.getElementById('bar-grace-text').innerText = graceKb + ' KB';
+          document.getElementById('grace-count-text').innerText = data.storage.grace_record_count;
+
+          const totalMax = data.storage.max_bytes || 1;
+          const actPct = Math.min(100, Math.max(1, (data.storage.active_bytes / totalMax) * 100));
+          const grcPct = Math.min(100, (data.storage.grace_bytes / totalMax) * 100);
+
+          document.getElementById('cap-active-bar').style.width = actPct + '%';
+          document.getElementById('cap-grace-bar').style.width = grcPct + '%';
+        }
 
         // Render records table
         const recRes = await fetch('/api/dashboard/records');
         const recData = await recRes.json();
         if (recData.records && recData.records.length > 0) {
           const tbody = document.getElementById('records-table-body');
-          tbody.innerHTML = recData.records.map(r => `
+          tbody.innerHTML = recData.records.map(r => {
+            const quorumBadges = (r.storage_peers || []).map(sp => 
+              `<span class="badge ${sp.includes('delta') ? 'badge-danger' : 'badge-primary'}" style="margin-right:3px;font-size:0.75rem;padding:2px 6px;">${sp}</span>`
+            ).join('') || '<span style="color:var(--text-muted);">-</span>';
+            return `
             <tr>
               <td class="mono" style="font-weight:600;color:var(--accent);">${r.data_id}</td>
               <td>${r.collection}</td>
               <td><span class="badge badge-primary">v${r.version}</span></td>
-              <td class="mono">${r.user_pub_address ? r.user_pub_address.substring(0,16)+'...' : 'Anonymous'}</td>
+              <td class="mono">${r.user_pub_address ? (r.user_pub_address.length > 20 ? r.user_pub_address.substring(0,18)+'...' : r.user_pub_address) : 'Anonymous'}</td>
+              <td>${quorumBadges}</td>
               <td>${r.acl ? r.acl.length + ' Collaborators' : 'Owner Only'}</td>
               <td class="mono">${r.merkle_root ? r.merkle_root.substring(0,12)+'...' : '-'}</td>
               <td>${new Date(r.updated_at).toLocaleString()}</td>
             </tr>
-          `).join('');
+          `;
+          }).join('');
         }
 
         // Render peers
         if (data.peers && data.peers.length > 0) {
           const ptbody = document.getElementById('peers-table-body');
-          ptbody.innerHTML = data.peers.map(p => `
-            <tr>
-              <td class="mono">${p.node_id}</td>
+          ptbody.innerHTML = data.peers.map(p => {
+            const isOnline = p.is_online !== false;
+            const statusBadge = isOnline 
+              ? '<span class="badge badge-success" style="display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#3fb950;"></span>ONLINE</span>'
+              : '<span class="badge badge-danger" style="background:rgba(248,81,73,0.2);color:#ff7b72;border:1px solid #f85149;display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f85149;"></span>OFFLINE</span>';
+            const rowStyle = isOnline ? '' : 'style="opacity:0.65;background:rgba(248,81,73,0.06);"';
+            const latencyStr = isOnline ? (p.avg_latency_ms > 0 ? p.avg_latency_ms.toFixed(1) + ' ms' : '< 1 ms') : '<span style="color:#ff7b72;">Unreachable</span>';
+            return `
+            <tr ${rowStyle}>
+              <td>${statusBadge}</td>
+              <td class="mono"><strong>${p.node_id}</strong></td>
               <td class="mono">${p.public_addr || p.reticulum_dest || '-'}</td>
               <td>${p.is_public ? '<span class="badge badge-primary">Public</span>' : '<span class="badge badge-warning">Private</span>'}</td>
               <td>${p.price_per_gb_month} sats</td>
               <td>${p.audits_passed}</td>
               <td>${p.audits_performed}</td>
-              <td>${p.avg_latency_ms.toFixed(1)} ms</td>
+              <td>${latencyStr}</td>
               <td><strong>${p.social_score.toFixed(1)}</strong></td>
+            </tr>
+          `;
+          }).join('');
+        }
+
+        // Render recent audits
+        if (data.recent_audits && data.recent_audits.length > 0) {
+          const atbody = document.getElementById('audits-table-body');
+          atbody.innerHTML = data.recent_audits.slice().reverse().map(a => `
+            <tr>
+              <td class="mono" style="font-weight:600;color:var(--accent);">${a.challenge_id}</td>
+              <td class="mono" style="font-weight:600;">${a.storage_node}</td>
+              <td>${a.passed ? '<span class="badge badge-success">✓ PASSED</span>' : '<span class="badge badge-warning" style="background:rgba(248,81,73,0.2);color:#ff7b72;border:1px solid #f85149;">✕ FAILED (OFFLINE)</span>'}</td>
+              <td>${new Date(a.timestamp).toLocaleTimeString()}</td>
+              <td>${a.latency_ms > 0 ? a.latency_ms.toFixed(1) + ' ms' : '-'}</td>
+              <td>${a.notes}</td>
             </tr>
           `).join('');
         }
       } catch (e) {
         console.error('Failed to load stats:', e);
+      }
+    }
+
+    async function triggerAudit() {
+      try {
+        const res = await fetch('/api/audit/trigger');
+        const data = await res.json();
+        loadStats();
+      } catch (e) {
+        alert('Failed to trigger audit: ' + e);
+      }
+    }
+
+    function renderWhitelistPills(list) {
+      const container = document.getElementById('whitelist-pills');
+      if (!list || list.length === 0) {
+        container.innerHTML = '<span style="color:var(--text-muted);font-size:0.85rem;">No addresses whitelisted yet.</span>';
+        return;
+      }
+      container.innerHTML = list.map(addr => `
+        <div class="whitelist-pill mono">
+          <span>${addr}</span>
+          <button class="pill-remove" title="Remove from whitelist" onclick="removeWhitelistAddress('${addr}')">&times;</button>
+        </div>
+      `).join('');
+    }
+
+    async function toggleFreeForAll(checked) {
+      try {
+        await fetch('/api/escrow/policy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ free_for_all: checked })
+        });
+        loadStats();
+      } catch (e) {
+        alert('Failed to update pricing policy: ' + e);
+      }
+    }
+
+    async function updatePrice() {
+      const price = parseInt(document.getElementById('price-per-gb').value);
+      if (isNaN(price) || price <= 0) return alert('Please enter a valid price in sats');
+      try {
+        await fetch('/api/escrow/policy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ price_per_gb_month: price })
+        });
+        alert('Storage price updated to ' + price + ' sats/GB/month!');
+        loadStats();
+      } catch (e) {
+        alert('Failed to update price: ' + e);
+      }
+    }
+
+    async function addWhitelistAddress() {
+      const input = document.getElementById('whitelist-address-input');
+      const addr = input.value.trim();
+      if (!addr) return alert('Please enter a public key or Reticulum address');
+      try {
+        await fetch('/api/escrow/whitelist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'add', address: addr })
+        });
+        input.value = '';
+        loadStats();
+      } catch (e) {
+        alert('Failed to add whitelist: ' + e);
+      }
+    }
+
+    async function removeWhitelistAddress(addr) {
+      try {
+        await fetch('/api/escrow/whitelist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'remove', address: addr })
+        });
+        loadStats();
+      } catch (e) {
+        alert('Failed to remove whitelist: ' + e);
+      }
+    }
+
+    async function updateQuota() {
+      const gb = parseInt(document.getElementById('quota-input-gb').value);
+      if (isNaN(gb) || gb <= 0) return alert('Please enter a valid quota in GB');
+      const bytes = gb * 1024 * 1024 * 1024;
+      try {
+        await fetch('/api/storage/quota', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ max_bytes: bytes })
+        });
+        alert('Storage quota updated to ' + gb + ' GB!');
+        loadStats();
+      } catch (e) {
+        alert('Failed to update quota: ' + e);
       }
     }
 
@@ -424,7 +814,7 @@
 
     loadStats();
     checkUpdates();
-    setInterval(loadStats, 5000);
+    setInterval(loadStats, 4000);
   </script>
 </body>
 </html>

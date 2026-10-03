@@ -3,6 +3,7 @@ package storage
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stiqrhub/testcloud/pkg/crypto"
 )
@@ -115,5 +116,77 @@ func TestStandaloneDatabaseCRUDAndInvariantDataID(t *testing.T) {
 	_, err = store.GetRecord(originalDataID)
 	if err == nil {
 		t.Fatalf("Record should have been deleted")
+	}
+}
+
+func TestExpiredContractEvictionWhenStorageFull(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "testcloud_evict_*")
+	if err != nil {
+		t.Fatalf("MkdirTemp failed: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	store, err := NewStore(tempDir)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+
+	// Set small quota of 300 bytes
+	store.SetMaxDiskBytes(300)
+
+	// Simulated contract status: doc_expired is expired, doc_active is active
+	expiredTime := time.Now().Add(-2 * time.Hour)
+	activeTime := time.Now().Add(30 * 24 * time.Hour)
+
+	store.SetContractChecker(func(dataID string) (bool, time.Time) {
+		if dataID == "doc_expired" {
+			return true, expiredTime
+		}
+		return false, activeTime
+	})
+
+	// 1. Create expired record with 150 byte payload
+	chunk1 := make([]byte, 150)
+	for i := range chunk1 {
+		chunk1[i] = 'A'
+	}
+	rec1 := &Record{DataID: "doc_expired", Collection: "test"}
+	_, err = store.CreateRecord(rec1, chunk1, nil)
+	if err != nil {
+		t.Fatalf("CreateRecord doc_expired failed: %v", err)
+	}
+
+	// Verify chunk1 exists on disk (NOT automatically deleted upon contract expiry!)
+	stats := store.StorageStats()
+	if stats.UsedBytes < 150 {
+		t.Fatalf("Expected chunk to be preserved, used %d", stats.UsedBytes)
+	}
+	if stats.GraceRecordCount != 1 {
+		t.Fatalf("Expected 1 record in grace retention, got %d", stats.GraceRecordCount)
+	}
+
+	// 2. Now write a new active contract chunk with 200 bytes
+	// 150 (existing) + 200 (new) = 350 bytes > 300 bytes max limit!
+	// Storage engine must evict doc_expired chunk to make room for new contract!
+	chunk2 := make([]byte, 200)
+	for i := range chunk2 {
+		chunk2[i] = 'B'
+	}
+	rec2 := &Record{DataID: "doc_active", Collection: "test"}
+	_, err = store.CreateRecord(rec2, chunk2, nil)
+	if err != nil {
+		t.Fatalf("CreateRecord doc_active should succeed after evicting expired contract: %v", err)
+	}
+
+	// Verify doc_active chunk exists
+	newChunk, err := store.GetChunk(rec2.FileChunkHash)
+	if err != nil || len(newChunk) != 200 {
+		t.Fatalf("Expected active chunk to be present")
+	}
+
+	// Verify doc_expired chunk was evicted to make room
+	_, err = store.GetChunk(rec1.FileChunkHash)
+	if err == nil {
+		t.Fatalf("Expected expired chunk to be evicted when storage reached quota")
 	}
 }

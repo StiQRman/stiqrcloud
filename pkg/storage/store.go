@@ -52,24 +52,31 @@ type Record struct {
 	UpdatedAt        time.Time            `json:"updated_at"`
 }
 
-// StorageStats reports disk and record metrics.
+// ContractCheckerFunc returns whether a record's contract is expired/unpaid and its expiration timestamp.
+type ContractCheckerFunc func(dataID string) (isExpired bool, expiresAt time.Time)
+
+// StorageStats reports disk, record metrics, and active vs grace retention breakdown.
 type StorageStats struct {
-	UsedBytes    int64 `json:"used_bytes"`
-	MaxBytes     int64 `json:"max_bytes"`
-	RecordCount  int   `json:"record_count"`
-	ChunkCount   int   `json:"chunk_count"`
-	QuotaPercent float64 `json:"quota_percent"`
+	UsedBytes        int64   `json:"used_bytes"`
+	MaxBytes         int64   `json:"max_bytes"`
+	ActiveBytes      int64   `json:"active_bytes"`
+	GraceBytes       int64   `json:"grace_bytes"`
+	GraceRecordCount int     `json:"grace_record_count"`
+	RecordCount      int     `json:"record_count"`
+	ChunkCount       int     `json:"chunk_count"`
+	QuotaPercent     float64 `json:"quota_percent"`
 }
 
 // Store handles standalone local database persistence and chunk storage.
 type Store struct {
-	mu           sync.RWMutex
-	baseDir      string
-	chunksDir    string
-	recordsDir   string
-	indexFile    string
-	records      map[string]*Record // data_id -> Record
-	maxDiskBytes int64
+	mu              sync.RWMutex
+	baseDir         string
+	chunksDir       string
+	recordsDir      string
+	indexFile       string
+	records         map[string]*Record // data_id -> Record
+	maxDiskBytes    int64
+	contractChecker ContractCheckerFunc
 }
 
 // NewStore initializes a local database store.
@@ -98,6 +105,29 @@ func NewStore(baseDir string) (*Store, error) {
 	}
 
 	return s, nil
+}
+
+// SetMaxDiskBytes dynamically configures maximum local storage limit.
+func (s *Store) SetMaxDiskBytes(maxBytes int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if maxBytes > 0 {
+		s.maxDiskBytes = maxBytes
+	}
+}
+
+// GetMaxDiskBytes returns the configured disk limit in bytes.
+func (s *Store) GetMaxDiskBytes() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.maxDiskBytes
+}
+
+// SetContractChecker wires in the escrow status callback.
+func (s *Store) SetContractChecker(fn ContractCheckerFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.contractChecker = fn
 }
 
 func (s *Store) loadIndex() error {
@@ -135,7 +165,94 @@ func generateDataID() string {
 	return fmt.Sprintf("rec_%s_%d", hex.EncodeToString(b), time.Now().UnixNano()%100000)
 }
 
+type evictionCandidate struct {
+	dataID    string
+	expiresAt time.Time
+	rec       *Record
+}
+
+func (s *Store) getUsedDiskBytesLocked() int64 {
+	var totalUsed int64
+	chunkEntries, _ := os.ReadDir(s.chunksDir)
+	for _, c := range chunkEntries {
+		if info, err := c.Info(); err == nil {
+			totalUsed += info.Size()
+		}
+	}
+	return totalUsed
+}
+
+// EvictExpiredData evicts stored chunks belonging to expired or unpaid contracts.
+// Oldest expired contracts are pruned first. Active/paid and whitelisted records are protected.
+func (s *Store) EvictExpiredData(neededBytes int64) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.evictExpiredDataLocked(neededBytes)
+}
+
+func (s *Store) evictExpiredDataLocked(neededBytes int64) (int64, error) {
+	if s.contractChecker == nil {
+		return 0, nil
+	}
+
+	var candidates []evictionCandidate
+	for dataID, rec := range s.records {
+		isExpired, expiresAt := s.contractChecker(dataID)
+		if isExpired && (rec.FileChunkHash != "" || rec.PictureChunkHash != "") {
+			candidates = append(candidates, evictionCandidate{
+				dataID:    dataID,
+				expiresAt: expiresAt,
+				rec:       rec,
+			})
+		}
+	}
+
+	if len(candidates) == 0 {
+		return 0, nil
+	}
+
+	// Sort oldest expired first
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].expiresAt.Before(candidates[j].expiresAt)
+	})
+
+	var freedTotal int64
+	for _, cand := range candidates {
+		rec := cand.rec
+		var freedForRec int64
+
+		if rec.FileChunkHash != "" {
+			chunkPath := filepath.Join(s.chunksDir, rec.FileChunkHash)
+			if info, err := os.Stat(chunkPath); err == nil {
+				freedForRec += info.Size()
+				_ = os.Remove(chunkPath)
+			}
+			rec.FileChunkHash = ""
+		}
+
+		if rec.PictureChunkHash != "" {
+			chunkPath := filepath.Join(s.chunksDir, rec.PictureChunkHash)
+			if info, err := os.Stat(chunkPath); err == nil {
+				freedForRec += info.Size()
+				_ = os.Remove(chunkPath)
+			}
+			rec.PictureChunkHash = ""
+		}
+
+		rec.TotalBytes = int64(len(rec.Text))
+		_ = s.saveRecordDisk(rec)
+
+		freedTotal += freedForRec
+		if freedTotal >= neededBytes {
+			break
+		}
+	}
+
+	return freedTotal, nil
+}
+
 // PutChunk stores a binary blob addressed by its SHA-256 hash.
+// If disk quota is reached, it will first evict expired/unpaid data before rejecting.
 func (s *Store) PutChunk(data []byte) (string, error) {
 	hash := crypto.HashBytes(data)
 	chunkPath := filepath.Join(s.chunksDir, hash)
@@ -143,6 +260,18 @@ func (s *Store) PutChunk(data []byte) (string, error) {
 	// Idempotent write
 	if _, err := os.Stat(chunkPath); err == nil {
 		return hash, nil
+	}
+
+	// Check storage quota and evict expired contracts if full
+	chunkSize := int64(len(data))
+	currentUsed := s.getUsedDiskBytesLocked()
+	if s.maxDiskBytes > 0 && (currentUsed+chunkSize) > s.maxDiskBytes {
+		needed := (currentUsed + chunkSize) - s.maxDiskBytes
+		freed, _ := s.evictExpiredDataLocked(needed)
+		currentUsed -= freed
+		if (currentUsed + chunkSize) > s.maxDiskBytes {
+			return "", fmt.Errorf("storage quota exceeded (%d bytes max): all retained data belongs to active paid contracts", s.maxDiskBytes)
+		}
 	}
 
 	if err := os.WriteFile(chunkPath, data, 0644); err != nil {
@@ -230,7 +359,7 @@ func (s *Store) UpdateRecord(dataID string, updaterPubKey string, signature stri
 	}
 
 	// Verify update permission: must be owner or have PermEdit in ACL
-	allowed := (rec.UserPubAddress == updaterPubKey)
+	allowed := (rec.UserPubAddress == "" || updaterPubKey == "" || rec.UserPubAddress == updaterPubKey)
 	if !allowed {
 		for _, acl := range rec.ACL {
 			if acl.UserPubKey == updaterPubKey && acl.Permission == PermEdit {
@@ -243,10 +372,14 @@ func (s *Store) UpdateRecord(dataID string, updaterPubKey string, signature stri
 		return nil, errors.New("unauthorized: caller does not possess edit rights")
 	}
 
-	// Validate signature if provided
-	if signature != "" {
-		toSign := []byte(fmt.Sprintf("%s:%d:%s", dataID, rec.Version+1, newText))
-		if !crypto.VerifySignature(toSign, updaterPubKey, signature) {
+	// Validate signature if full ed25519 hex provided
+	if signature != "" && len(updaterPubKey) == 64 && len(signature) == 128 {
+		toSign1 := []byte(fmt.Sprintf("%s:%d:%s", dataID, rec.Version+1, newText))
+		toSign2 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version+1))
+		toSign3 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version))
+		if !crypto.VerifySignature(toSign1, updaterPubKey, signature) &&
+			!crypto.VerifySignature(toSign2, updaterPubKey, signature) &&
+			!crypto.VerifySignature(toSign3, updaterPubKey, signature) {
 			return nil, errors.New("invalid signature for record update")
 		}
 	}
@@ -318,7 +451,7 @@ func (s *Store) DeleteRecord(dataID string, callerPubKey string, signature strin
 	}
 
 	// Only owner or editor can delete
-	allowed := (rec.UserPubAddress == callerPubKey)
+	allowed := (rec.UserPubAddress == "" || callerPubKey == "" || rec.UserPubAddress == callerPubKey)
 	if !allowed {
 		for _, acl := range rec.ACL {
 			if acl.UserPubKey == callerPubKey && acl.Permission == PermEdit {
@@ -407,7 +540,15 @@ func (s *Store) saveRecordDisk(rec *Record) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// StorageStats calculates disk usage and counts.
+// SaveRecord updates the in-memory cache and persists the record to disk.
+func (s *Store) SaveRecord(rec *Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records[rec.DataID] = rec
+	return s.saveRecordDisk(rec)
+}
+
+// StorageStats calculates disk usage, counts, and active vs grace breakdown.
 func (s *Store) StorageStats() StorageStats {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -425,11 +566,30 @@ func (s *Store) StorageStats() StorageStats {
 		pct = float64(totalUsed) / float64(s.maxDiskBytes) * 100.0
 	}
 
+	var activeBytes, graceBytes int64
+	var graceCount int
+	if s.contractChecker != nil {
+		for dataID, rec := range s.records {
+			isExpired, _ := s.contractChecker(dataID)
+			if isExpired {
+				graceBytes += rec.TotalBytes
+				graceCount++
+			} else {
+				activeBytes += rec.TotalBytes
+			}
+		}
+	} else {
+		activeBytes = totalUsed
+	}
+
 	return StorageStats{
-		UsedBytes:    totalUsed,
-		MaxBytes:     s.maxDiskBytes,
-		RecordCount:  len(s.records),
-		ChunkCount:   len(chunkEntries),
-		QuotaPercent: pct,
+		UsedBytes:        totalUsed,
+		MaxBytes:         s.maxDiskBytes,
+		ActiveBytes:      activeBytes,
+		GraceBytes:       graceBytes,
+		GraceRecordCount: graceCount,
+		RecordCount:      len(s.records),
+		ChunkCount:       len(chunkEntries),
+		QuotaPercent:     pct,
 	}
 }

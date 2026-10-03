@@ -79,9 +79,16 @@ func (s *Server) handleStatsJSON(w http.ResponseWriter, r *http.Request) {
 		rnsPeers = s.rnsManager.GetPeersCount()
 	}
 
+	onlinePeers := 0
+	for _, p := range peers {
+		if p.IsOnline {
+			onlinePeers++
+		}
+	}
+
 	mode := "Standalone Database (Local)"
 	if len(peers) > 0 {
-		mode = fmt.Sprintf("Decentralized P2P Mesh (%d peers)", len(peers))
+		mode = fmt.Sprintf("Decentralized P2P Mesh (%d online / %d total)", onlinePeers, len(peers))
 	}
 
 	var totalSatsAccrued int64
@@ -99,12 +106,14 @@ func (s *Server) handleStatsJSON(w http.ResponseWriter, r *http.Request) {
 		"reticulum_peers":    rnsPeers,
 		"storage":            storageStats,
 		"peers_count":        len(peers),
+		"online_peers_count": onlinePeers,
 		"peers":              peers,
 		"audit_count":        len(audits),
 		"recent_audits":      audits,
 		"contracts_count":    len(contracts),
 		"contracts":          contracts,
 		"total_sats_accrued": totalSatsAccrued,
+		"pricing_policy":     s.escrowMgr.GetPolicy(),
 		"server_time":        time.Now().UTC().Format(time.RFC3339),
 	}
 

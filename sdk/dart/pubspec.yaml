@@ -1,0 +1,16 @@
+name: testcloud
+description: Official Dart and Flutter Client SDK for TestCloud - Decentralized, local-first hybrid database with end-to-end encryption.
+version: 0.1.0
+repository: https://github.com/stiqrhub/testcloud
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  http: ^1.6.0
+  crypto: ^3.0.7
+  cryptography: ^2.9.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6
