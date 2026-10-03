@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/stiqrhub/testcloud/pkg/audit"
@@ -21,19 +22,20 @@ import (
 
 // Server coordinates HTTP API routing and services.
 type Server struct {
-	nodeID     string
-	name       string
-	location   string
-	publicIP   string
-	store      *storage.Store
-	swarm      *p2p.Swarm
-	escrowMgr  *escrow.Manager
-	auditor    *audit.Coordinator
-	rnsManager *reticulum.InterfaceManager
-	rnsDest    string
-	isPublic   bool
-	standalone bool
-	mux        *http.ServeMux
+	nodeID      string
+	name        string
+	location    string
+	publicIP    string
+	store       *storage.Store
+	swarm       *p2p.Swarm
+	escrowMgr   *escrow.Manager
+	auditor     *audit.Coordinator
+	rnsManager  *reticulum.InterfaceManager
+	rnsDest     string
+	isPublic    bool
+	standalone  bool
+	mux         *http.ServeMux
+	reconciling atomic.Bool
 }
 
 // Config holds gateway server options.
@@ -367,6 +369,11 @@ func (s *Server) ReconcileAndReplicateAll() int {
 		return 0
 	}
 
+	if !s.reconciling.CompareAndSwap(false, true) {
+		return 0
+	}
+	defer s.reconciling.Store(false)
+
 	peers := s.swarm.ListPeers()
 	onlineCount := 0
 	for _, p := range peers {
@@ -399,11 +406,13 @@ func (s *Server) ReconcileAndReplicateAll() int {
 				rec.AuditorPeers = auditors
 				rec.StoragePeers = storageNodes
 				_ = s.store.SaveRecord(rec)
+				_ = s.replicateAndEngageQuorum(rec, nil, nil)
+				reconciled++
+				if reconciled >= 10 {
+					break // throttle to at most 10 records per cycle to prevent CPU/network exhaustion
+				}
 			}
 		}
-
-		_ = s.replicateAndEngageQuorum(rec, nil, nil)
-		reconciled++
 	}
 	return reconciled
 }
@@ -1346,7 +1355,6 @@ func (s *Server) handleDiscoveryAnnounce(w http.ResponseWriter, r *http.Request)
 			IsOnline:        true,
 			LastSeen:        time.Now().UTC(),
 		})
-		go s.ReconcileAndReplicateAll()
 	}
 
 	var peers []*p2p.Peer
