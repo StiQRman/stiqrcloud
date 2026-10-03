@@ -154,6 +154,7 @@ func (s *Server) setupRoutes() {
 	// Binary Download & One-Line Installer API
 	s.mux.HandleFunc("/download/", s.handleDownload)
 	s.mux.HandleFunc("/install.sh", s.handleInstallScript)
+	s.mux.HandleFunc("/install.ps1", s.handlePowerShellScript)
 
 	// Dashboard Integration
 	dash := dashboard.NewServer(
@@ -229,7 +230,7 @@ func (s *Server) handlePeers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if p.NodeID != "" && p.NodeID != s.nodeID {
-			s.swarm.RegisterPeer(&p)
+			s.swarm.RegisterDirectPeer(&p)
 		}
 		peers := s.swarm.ListPeers()
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1329,12 +1330,16 @@ func (s *Server) handleDiscoveryAnnounce(w http.ResponseWriter, r *http.Request)
 	}
 
 	if s.swarm != nil && id != "" && id != s.nodeID {
-		s.swarm.RegisterPeer(&p2p.Peer{
+		pubAddr := req.PublicAddr
+		if strings.Contains(pubAddr, "0.0.0.0") || strings.Contains(pubAddr, "127.0.0.1") || strings.Contains(pubAddr, "localhost") {
+			pubAddr = ""
+		}
+		s.swarm.RegisterDirectPeer(&p2p.Peer{
 			NodeID:          id,
 			Name:            name,
 			Location:        req.Location,
 			PublicIP:        req.PublicIP,
-			PublicAddr:      req.PublicAddr,
+			PublicAddr:      pubAddr,
 			ReticulumDest:   req.ReticulumDest,
 			IsPublic:        req.IsPublic,
 			PricePerGBMonth: req.PricePerGBMonth,
@@ -1433,6 +1438,8 @@ OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
 if [ "$OS" != "linux" ]; then
   echo "Error: Linux required. Detected: $OS"
+  echo "If you are on Windows, run this in PowerShell instead:"
+  echo "  iwr -useb %s/install.ps1 | iex"
   exit 1
 fi
 
@@ -1456,8 +1463,26 @@ mkdir -p "$DEST_DIR"
 TARGET_BIN="$DEST_DIR/testcloud"
 
 echo "-> Downloading static binary from %s..."
-curl -sSLf "%s/download/$BIN_FILE" -o "$TARGET_BIN" || curl -sSLf "%s/download/testcloud" -o "$TARGET_BIN"
+if command -v curl >/dev/null 2>&1; then
+  curl -sSLf "%s/download/$BIN_FILE" -o "$TARGET_BIN" || curl -sSLf "%s/download/testcloud" -o "$TARGET_BIN"
+elif command -v wget >/dev/null 2>&1; then
+  wget -qO "$TARGET_BIN" "%s/download/$BIN_FILE" || wget -qO "$TARGET_BIN" "%s/download/testcloud"
+else
+  echo "Error: curl or wget is required to download the binary."
+  exit 1
+fi
 chmod +x "$TARGET_BIN"
+
+# Automatically find available ports to prevent conflicts
+PORT=8100
+while command -v ss >/dev/null 2>&1 && ss -tlpn 2>/dev/null | grep -q ":$PORT "; do
+  PORT=$((PORT+1))
+done
+
+RNS_PORT=4242
+while command -v ss >/dev/null 2>&1 && ss -ulpn 2>/dev/null | grep -q ":$RNS_PORT "; do
+  RNS_PORT=$((RNS_PORT+1))
+done
 
 NODE_NAME="${TESTCLOUD_NAME:-FriendNode-$(hostname -s 2>/dev/null || echo "VM")-$RANDOM}"
 DISCOVERY_URL="%s"
@@ -1465,17 +1490,55 @@ DISCOVERY_URL="%s"
 echo "=================================================================="
 echo "-> Starting TestCloud node '$NODE_NAME'..."
 echo "-> Connecting to discovery rendezvous: $DISCOVERY_URL"
-echo "-> Private Dashboard active at: http://localhost:8100/dashboard"
+echo "-> Private Dashboard active at: http://localhost:$PORT/dashboard"
 echo "=================================================================="
 
 exec "$TARGET_BIN" \
   -host 0.0.0.0 \
-  -port 8100 \
+  -port "$PORT" \
+  -rns-port "$RNS_PORT" \
   -discovery-url "$DISCOVERY_URL" \
   -peers "$DISCOVERY_URL" \
   -data-dir "$DEST_DIR/data" \
   -name "$NODE_NAME"
-`, baseURL, baseURL, baseURL, baseURL)
+`, baseURL, baseURL, baseURL, baseURL, baseURL, baseURL, baseURL)
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(script))
+}
+
+func (s *Server) handlePowerShellScript(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	proto := "https"
+	if r.TLS == nil && !strings.Contains(host, "stiqrnotes.com") {
+		proto = "http"
+	}
+	baseURL := fmt.Sprintf("%s://%s", proto, host)
+
+	script := fmt.Sprintf(`# TestCloud Windows PowerShell Installer & Launcher
+$destDir = "$HOME\.testcloud"
+New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+$binPath = "$destDir\testcloud.exe"
+
+Write-Host "=================================================================="
+Write-Host "          Installing TestCloud Decentralized Node (Windows)       "
+Write-Host "=================================================================="
+
+Write-Host "-> Downloading TestCloud for Windows..."
+Invoke-WebRequest -Uri "%s/download/testcloud-windows-amd64.exe" -OutFile $binPath
+
+$randomId = Get-Random -Minimum 1000 -Maximum 9999
+$nodeName = "WindowsNode-$randomId"
+$discoveryUrl = "%s"
+
+Write-Host "-> Starting TestCloud node '$nodeName'..."
+Write-Host "-> Connecting to discovery rendezvous: $discoveryUrl"
+Write-Host "-> Private Dashboard active at: http://localhost:8100/dashboard"
+Write-Host "=================================================================="
+
+& $binPath -host 0.0.0.0 -port 8100 -discovery-url "$discoveryUrl" -peers "$discoveryUrl" -data-dir "$destDir\data" -name "$nodeName"
+`, baseURL, baseURL)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)

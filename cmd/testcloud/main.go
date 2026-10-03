@@ -90,7 +90,7 @@ func main() {
 	}
 
 	// 3. Initialize Swarm, Escrow, and Auditor
-	listenAddr := fmt.Sprintf("http://%s:%d", *host, *port)
+	listenAddr := ""
 	if *gatewayURL != "" {
 		listenAddr = strings.TrimRight(*gatewayURL, "/")
 	} else if *publicAddr != "" {
@@ -99,6 +99,8 @@ func main() {
 			addr = "http://" + addr
 		}
 		listenAddr = addr
+	} else if *host != "0.0.0.0" && *host != "127.0.0.1" && *host != "localhost" {
+		listenAddr = fmt.Sprintf("http://%s:%d", *host, *port)
 	}
 	swarm := p2p.NewSwarm(*nodeID, listenAddr, store)
 	swarm.SetIdentity(rnsDest, *isPublic, *price)

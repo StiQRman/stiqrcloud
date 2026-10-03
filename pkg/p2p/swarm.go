@@ -205,10 +205,20 @@ func (s *Swarm) AddBootstrapPeer(addr string) {
 	s.bootstrapPeers = append(s.bootstrapPeers, addr)
 }
 
-// RegisterPeer registers or updates a peer in the local routing table.
-func (s *Swarm) RegisterPeer(p *Peer) {
+// RegisterDirectPeer registers or updates a peer that has contacted us directly
+// (e.g. through discovery announcement or direct peer greeting).
+func (s *Swarm) RegisterDirectPeer(p *Peer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if p.NodeID == "" || p.NodeID == s.localID {
+		return
+	}
+
+	// Never accept 0.0.0.0 or loopback as a peer's public address
+	if strings.Contains(p.PublicAddr, "0.0.0.0") || strings.Contains(p.PublicAddr, "127.0.0.1") || strings.Contains(p.PublicAddr, "localhost") {
+		p.PublicAddr = ""
+	}
 
 	existing, exists := s.peers[p.NodeID]
 	if exists {
@@ -244,6 +254,71 @@ func (s *Swarm) RegisterPeer(p *Peer) {
 	p.LastSeen = time.Now().UTC()
 	s.calculateSocialScore(p)
 	s.peers[p.NodeID] = p
+}
+
+// RegisterPeer registers or updates a peer in the local routing table via passive gossip.
+func (s *Swarm) RegisterPeer(p *Peer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if p.NodeID == "" || p.NodeID == s.localID {
+		return
+	}
+
+	// Never accept 0.0.0.0 or loopback as a peer's public address
+	if strings.Contains(p.PublicAddr, "0.0.0.0") || strings.Contains(p.PublicAddr, "127.0.0.1") || strings.Contains(p.PublicAddr, "localhost") {
+		p.PublicAddr = ""
+	}
+
+	existing, exists := s.peers[p.NodeID]
+	if exists {
+		// Passive gossip MUST NOT resurrect an offline node that failed direct probing!
+		if existing.IsOnline {
+			existing.LastSeen = time.Now().UTC()
+		}
+		if p.Name != "" {
+			existing.Name = p.Name
+		}
+		if p.Location != "" {
+			existing.Location = p.Location
+		}
+		if p.PublicIP != "" {
+			existing.PublicIP = p.PublicIP
+		}
+		if p.PublicAddr != "" {
+			existing.PublicAddr = p.PublicAddr
+		}
+		if p.ReticulumDest != "" {
+			existing.ReticulumDest = p.ReticulumDest
+		}
+		if p.PricePerGBMonth > 0 {
+			existing.PricePerGBMonth = p.PricePerGBMonth
+		}
+		if p.AvgLatencyMs > 0 {
+			existing.AvgLatencyMs = p.AvgLatencyMs
+		}
+		existing.IsPublic = p.IsPublic
+		s.calculateSocialScore(existing)
+		return
+	}
+
+	// For a new peer learned passively via gossip:
+	// If it has an address, mark offline until ProbePeers verifies reachability directly.
+	// If it has no address, only online if LastSeen is very recent.
+	if p.PublicAddr != "" {
+		p.IsOnline = false
+	} else {
+		p.IsOnline = time.Since(p.LastSeen) <= 15*time.Second
+	}
+	s.calculateSocialScore(p)
+	s.peers[p.NodeID] = p
+}
+
+// RemovePeer deletes a peer from the local routing table.
+func (s *Swarm) RemovePeer(nodeID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.peers, nodeID)
 }
 
 // GetPeer finds a peer by NodeID.
@@ -558,6 +633,10 @@ func (s *Swarm) BroadcastRecordFull(rec *storage.Record, storagePeers []string, 
 // ConnectPeer contacts a remote peer, announces the local node, and learns peers.
 func (s *Swarm) ConnectPeer(peerURL string, rnsDest string, isPublic bool, price int64) error {
 	peerURL = strings.TrimRight(peerURL, "/")
+	if peerURL == "" || strings.Contains(peerURL, "0.0.0.0") || strings.Contains(peerURL, "127.0.0.1") || strings.Contains(peerURL, "localhost") {
+		return nil
+	}
+
 	// 1. Fetch remote node info
 	start := time.Now()
 	resp, err := s.httpClient.Get(fmt.Sprintf("%s/api/health", peerURL))
@@ -578,7 +657,7 @@ func (s *Swarm) ConnectPeer(peerURL string, rnsDest string, isPublic bool, price
 
 	// Register remote peer in local swarm
 	if health.NodeID != "" && health.NodeID != s.localID {
-		s.RegisterPeer(&Peer{
+		s.RegisterDirectPeer(&Peer{
 			NodeID:          health.NodeID,
 			PublicAddr:      peerURL,
 			ReticulumDest:   health.RNSDest,
@@ -727,18 +806,46 @@ func (s *Swarm) GossipPeers() {
 
 // ProbePeers pings all known peers to dynamically refresh online/offline status.
 func (s *Swarm) ProbePeers() {
-	s.mu.RLock()
+	s.mu.Lock()
 	type peerCheck struct {
 		nodeID string
 		addr   string
 	}
 	var toCheck []peerCheck
+	now := time.Now().UTC()
+	var toPrune []string
+
 	for id, p := range s.peers {
-		if p.PublicAddr != "" {
-			toCheck = append(toCheck, peerCheck{nodeID: id, addr: p.PublicAddr})
+		// Clean up dead nodes:
+		// 1) Ephemeral edge nodes with no PublicAddr that haven't announced in > 30 seconds
+		// 2) Nodes marked offline that haven't been seen in > 3 minutes
+		if p.PublicAddr == "" && now.Sub(p.LastSeen) > 30*time.Second {
+			toPrune = append(toPrune, id)
+			continue
 		}
+		if !p.IsOnline && now.Sub(p.LastSeen) > 3*time.Minute {
+			toPrune = append(toPrune, id)
+			continue
+		}
+
+		// For edge nodes with no inbound public address:
+		// Liveness is driven by periodic discovery announcements (within 15s)
+		if p.PublicAddr == "" {
+			if now.Sub(p.LastSeen) <= 15*time.Second {
+				p.IsOnline = true
+			} else {
+				p.IsOnline = false
+			}
+			continue
+		}
+
+		toCheck = append(toCheck, peerCheck{nodeID: id, addr: p.PublicAddr})
 	}
-	s.mu.RUnlock()
+
+	for _, pruneID := range toPrune {
+		delete(s.peers, pruneID)
+	}
+	s.mu.Unlock()
 
 	client := &http.Client{Timeout: 1200 * time.Millisecond}
 	for _, pc := range toCheck {
@@ -752,8 +859,13 @@ func (s *Swarm) ProbePeers() {
 			_ = resp.Body.Close()
 
 			if h.NodeID != "" && h.NodeID != pc.nodeID {
-				// Prevent self-loopback false positive
-				s.MarkPeerOffline(pc.nodeID)
+				// Prevent self-loopback or wrong node collision: clear invalid address!
+				s.mu.Lock()
+				if p, ok := s.peers[pc.nodeID]; ok {
+					p.PublicAddr = ""
+					p.IsOnline = false
+				}
+				s.mu.Unlock()
 				continue
 			}
 
