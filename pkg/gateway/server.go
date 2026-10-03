@@ -80,6 +80,21 @@ func NewServer(cfg Config) *Server {
 	}
 
 	s.setupRoutes()
+
+	// Periodic mesh reconciliation loop: ensures any records lacking replicas are backed up to peers
+	if !s.standalone && s.swarm != nil && s.store != nil {
+		go func() {
+			time.Sleep(3 * time.Second)
+			s.ReconcileAndReplicateAll()
+
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				s.ReconcileAndReplicateAll()
+			}
+		}()
+	}
+
 	return s
 }
 
@@ -228,23 +243,162 @@ func (s *Server) handleInternalStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var rec storage.Record
-	if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+
+	var payload struct {
+		Record      *storage.Record `json:"record"`
+		FileData    []byte          `json:"file_data"`
+		PictureData []byte          `json:"picture_data"`
+		DataID      string          `json:"data_id"`
+	}
+
+	var rec *storage.Record
+	var fileData, picData []byte
+
+	if err := json.Unmarshal(raw, &payload); err == nil && payload.Record != nil && payload.Record.DataID != "" {
+		rec = payload.Record
+		fileData = payload.FileData
+		picData = payload.PictureData
+	} else {
+		var fallback storage.Record
+		if err := json.Unmarshal(raw, &fallback); err == nil && fallback.DataID != "" {
+			rec = &fallback
+		}
+	}
+
+	if rec == nil || rec.DataID == "" {
 		http.Error(w, "invalid record payload", http.StatusBadRequest)
 		return
 	}
 
-	created, err := s.store.CreateRecord(&rec, nil, nil)
+	stored, err := s.store.UpsertReplicatedRecord(rec, fileData, picData)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to store replicated record: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	// Ensure escrow contract exists locally
+	if s.escrowMgr != nil {
+		rates := make(map[string]int64)
+		for _, st := range stored.StoragePeers {
+			rates[st] = 100
+		}
+		_, _ = s.escrowMgr.CreateContract(stored.DataID, stored.UserPubAddress, stored.TotalBytes, 1, rates, stored.AuditorPeers)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "stored",
-		"data_id": created.DataID,
+		"data_id": stored.DataID,
+		"version": stored.Version,
 	})
+}
+
+// replicateAndEngageQuorum selects healthy storage peers if needed, creates/updates the contract, and broadcasts replicas.
+func (s *Server) replicateAndEngageQuorum(rec *storage.Record, fileBytes, picBytes []byte) error {
+	if s.standalone || s.swarm == nil || rec == nil {
+		return nil
+	}
+
+	// Verify existing storage peers
+	peersOnline := 0
+	hasAutoNode := false
+	if len(rec.StoragePeers) > 0 {
+		for _, sp := range rec.StoragePeers {
+			if strings.Contains(sp, "auto") {
+				hasAutoNode = true
+				break
+			}
+			if p, ok := s.swarm.GetPeer(sp); ok && p.IsOnline && p.PublicAddr != "" {
+				peersOnline++
+			}
+		}
+	}
+
+	// If fewer than 2 active storage peers, or has synthetic auto nodes, or < 3 peers, reselect quorum!
+	if hasAutoNode || peersOnline < 2 || len(rec.StoragePeers) < 3 {
+		auditors, storageNodes, qErr := s.swarm.SelectQuorum()
+		if qErr == nil {
+			rec.AuditorPeers = auditors
+			rec.StoragePeers = storageNodes
+			_ = s.store.SaveRecord(rec)
+		}
+	}
+
+	// Always ensure contract exists / updated in escrow
+	rates := make(map[string]int64)
+	for _, st := range rec.StoragePeers {
+		rates[st] = 100
+	}
+	if s.escrowMgr != nil {
+		_, _ = s.escrowMgr.CreateContract(rec.DataID, rec.UserPubAddress, rec.TotalBytes, 1, rates, rec.AuditorPeers)
+	}
+
+	// Fetch chunk bytes from store if not provided in caller
+	if len(fileBytes) == 0 && rec.FileChunkHash != "" && s.store != nil {
+		if chunk, err := s.store.GetChunk(rec.FileChunkHash); err == nil {
+			fileBytes = chunk
+		}
+	}
+	if len(picBytes) == 0 && rec.PictureChunkHash != "" && s.store != nil {
+		if chunk, err := s.store.GetChunk(rec.PictureChunkHash); err == nil {
+			picBytes = chunk
+		}
+	}
+
+	// Broadcast backup to all assigned storage peers!
+	return s.swarm.BroadcastRecordFull(rec, rec.StoragePeers, fileBytes, picBytes)
+}
+
+// ReconcileAndReplicateAll scans all records in the store, assigns live peers if missing, and replicates them.
+func (s *Server) ReconcileAndReplicateAll() int {
+	if s.standalone || s.swarm == nil || s.store == nil {
+		return 0
+	}
+
+	peers := s.swarm.ListPeers()
+	onlineCount := 0
+	for _, p := range peers {
+		if p.IsOnline && p.NodeID != s.nodeID {
+			onlineCount++
+		}
+	}
+	if onlineCount == 0 {
+		return 0
+	}
+
+	all := s.store.ListAllRecords()
+	reconciled := 0
+	for _, rec := range all {
+		needsQuorum := false
+		if len(rec.StoragePeers) < 3 {
+			needsQuorum = true
+		} else {
+			for _, sp := range rec.StoragePeers {
+				if strings.Contains(sp, "auto") {
+					needsQuorum = true
+					break
+				}
+			}
+		}
+
+		if needsQuorum {
+			auditors, storageNodes, qErr := s.swarm.SelectQuorum()
+			if qErr == nil {
+				rec.AuditorPeers = auditors
+				rec.StoragePeers = storageNodes
+				_ = s.store.SaveRecord(rec)
+			}
+		}
+
+		_ = s.replicateAndEngageQuorum(rec, nil, nil)
+		reconciled++
+	}
+	return reconciled
 }
 
 func (s *Server) handleRecordsRoot(w http.ResponseWriter, r *http.Request) {
@@ -475,6 +629,7 @@ func (s *Server) handleRecordDetail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		_ = s.replicateAndEngageQuorum(updated, nil, nil)
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(updated)
@@ -607,39 +762,41 @@ func (s *Server) handleCreatePBRecord(w http.ResponseWriter, r *http.Request, co
 		}
 	}
 
-	rec := &storage.Record{
-		DataID:         dataID,
-		Collection:     collection,
-		UserPubAddress: userPubKey,
-		OwnerSignature: sig,
-		Text:           text,
-		FileName:       fileName,
-		PictureName:    picName,
-	}
-
-	created, err := s.store.CreateRecord(rec, fileBytes, picBytes)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to create record: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// In network mode: engage quorum
-	if !s.standalone && s.swarm != nil {
-		auditors, storageNodes, qErr := s.swarm.SelectQuorum()
-		if qErr == nil {
-			created.AuditorPeers = auditors
-			created.StoragePeers = storageNodes
-
-			rates := make(map[string]int64)
-			for _, st := range storageNodes {
-				rates[st] = 100
+	var record *storage.Record
+	if dataID != "" {
+		if existing, err := s.store.GetRecord(dataID); err == nil && existing != nil {
+			// Record already exists; perform idempotent update
+			record, err = s.store.UpdateRecord(dataID, userPubKey, sig, text, fileBytes, picBytes)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("failed to update record: %v", err), http.StatusBadRequest)
+				return
 			}
-			_, _ = s.escrowMgr.CreateContract(created.DataID, created.UserPubAddress, created.TotalBytes, 1, rates, auditors)
-			_ = s.swarm.BroadcastRecord(created, storageNodes, fileBytes)
 		}
 	}
 
-	formatted := formatPBRecord(created)
+	if record == nil {
+		rec := &storage.Record{
+			DataID:         dataID,
+			Collection:     collection,
+			UserPubAddress: userPubKey,
+			OwnerSignature: sig,
+			Text:           text,
+			FileName:       fileName,
+			PictureName:    picName,
+		}
+
+		var err error
+		record, err = s.store.CreateRecord(rec, fileBytes, picBytes)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to create record: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Always engage quorum & replicate across mesh
+	_ = s.replicateAndEngageQuorum(record, fileBytes, picBytes)
+
+	formatted := formatPBRecord(record)
 	for k, v := range rawBodyMap {
 		if _, ok := formatted[k]; !ok {
 			formatted[k] = v
@@ -723,6 +880,7 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 						http.Error(w, err.Error(), http.StatusBadRequest)
 						return
 					}
+					_ = s.replicateAndEngageQuorum(updated, nil, nil)
 					w.Header().Set("Content-Type", "application/json")
 					_ = json.NewEncoder(w).Encode(formatPBRecord(updated))
 					return
@@ -969,20 +1127,8 @@ func (s *Server) handleSDKStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Engage quorum if in network mode
-	if !s.standalone && s.swarm != nil {
-		auditors, storageNodes, qErr := s.swarm.SelectQuorum()
-		if qErr == nil {
-			created.AuditorPeers = auditors
-			created.StoragePeers = storageNodes
-			rates := make(map[string]int64)
-			for _, st := range storageNodes {
-				rates[st] = 100
-			}
-			_, _ = s.escrowMgr.CreateContract(created.DataID, created.UserPubAddress, created.TotalBytes, 1, rates, auditors)
-			_ = s.swarm.BroadcastRecord(created, storageNodes, nil)
-		}
-	}
+	// Replicate across mesh & engage quorum
+	_ = s.replicateAndEngageQuorum(created, nil, nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1056,6 +1202,7 @@ func (s *Server) handleSDKEdit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	_ = s.replicateAndEngageQuorum(updated, nil, nil)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1188,6 +1335,7 @@ func (s *Server) handleDiscoveryAnnounce(w http.ResponseWriter, r *http.Request)
 			IsOnline:        true,
 			LastSeen:        time.Now().UTC(),
 		})
+		go s.ReconcileAndReplicateAll()
 	}
 
 	var peers []*p2p.Peer

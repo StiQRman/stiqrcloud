@@ -65,7 +65,7 @@ func NewManager(nodeID string, pricePerGB int64, dataDir ...string) *Manager {
 	m := &Manager{
 		nodeID: nodeID,
 		policy: PricingPolicy{
-			FreeForAll:      false,
+			FreeForAll:      true,
 			PricePerGBMonth: pricePerGB,
 			FreeWhitelist:   []string{},
 		},

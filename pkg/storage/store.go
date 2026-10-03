@@ -548,6 +548,62 @@ func (s *Store) SaveRecord(rec *Record) error {
 	return s.saveRecordDisk(rec)
 }
 
+// UpsertReplicatedRecord stores or updates a replicated record from another peer.
+// If the record exists and incoming version is older, existing is kept.
+// Attachments (fileData / picData) are saved to the chunk store if provided.
+func (s *Store) UpsertReplicatedRecord(rec *Record, fileData, picData []byte) (*Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if rec == nil || rec.DataID == "" {
+		return nil, errors.New("empty data_id in replicated record")
+	}
+
+	if len(fileData) > 0 {
+		h, err := s.PutChunk(fileData)
+		if err == nil {
+			rec.FileChunkHash = h
+		}
+	}
+	if len(picData) > 0 {
+		h, err := s.PutChunk(picData)
+		if err == nil {
+			rec.PictureChunkHash = h
+		}
+	}
+
+	existing, exists := s.records[rec.DataID]
+	if exists {
+		if rec.Version < existing.Version {
+			return existing, nil
+		}
+		if rec.FileChunkHash == "" && existing.FileChunkHash != "" {
+			rec.FileChunkHash = existing.FileChunkHash
+		}
+		if rec.PictureChunkHash == "" && existing.PictureChunkHash != "" {
+			rec.PictureChunkHash = existing.PictureChunkHash
+		}
+	}
+
+	if err := s.saveRecordDisk(rec); err != nil {
+		return nil, err
+	}
+	s.records[rec.DataID] = rec
+	return rec, nil
+}
+
+// ListAllRecords returns a slice containing all in-memory records.
+func (s *Store) ListAllRecords() []*Record {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var all []*Record
+	for _, r := range s.records {
+		all = append(all, r)
+	}
+	return all
+}
+
 // StorageStats calculates disk usage, counts, and active vs grace breakdown.
 func (s *Store) StorageStats() StorageStats {
 	s.mu.RLock()

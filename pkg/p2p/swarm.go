@@ -416,22 +416,33 @@ func (s *Swarm) fallbackQuorum(eligible []*Peer) ([]string, []string, error) {
 	auditors := []string{s.localID}
 	storageNodes := []string{}
 
+	// Prioritize real peers for storage nodes first so data is genuinely replicated!
 	for _, p := range eligible {
-		if len(auditors) < 3 {
-			auditors = append(auditors, p.NodeID)
-		} else if len(storageNodes) < 3 {
+		if len(storageNodes) < 3 {
 			storageNodes = append(storageNodes, p.NodeID)
+		}
+		if len(auditors) < 3 && p.NodeID != s.localID {
+			auditors = append(auditors, p.NodeID)
 		}
 	}
 
-	// Synthesize test nodes if needed for local standalone verification
+	// Synthesize test nodes ONLY if no real peers exist (e.g. standalone test mode)
 	padIdx := 1
-	for len(auditors) < 3 {
-		auditors = append(auditors, fmt.Sprintf("node_auditor_auto_%d", padIdx))
+	for len(storageNodes) < 3 {
+		if len(eligible) > 0 {
+			// Reuse real peers instead of inventing fake nodes
+			storageNodes = append(storageNodes, eligible[(padIdx-1)%len(eligible)].NodeID)
+		} else {
+			storageNodes = append(storageNodes, fmt.Sprintf("node_storage_auto_%d", padIdx))
+		}
 		padIdx++
 	}
-	for len(storageNodes) < 3 {
-		storageNodes = append(storageNodes, fmt.Sprintf("node_storage_auto_%d", padIdx))
+	for len(auditors) < 3 {
+		if len(eligible) > 0 {
+			auditors = append(auditors, eligible[(padIdx-1)%len(eligible)].NodeID)
+		} else {
+			auditors = append(auditors, fmt.Sprintf("node_auditor_auto_%d", padIdx))
+		}
 		padIdx++
 	}
 
@@ -469,7 +480,7 @@ func (s *Swarm) ResolveDataID(dataID string) (*storage.Record, error) {
 			if err := json.Unmarshal(body, &rec); err == nil && rec.DataID == dataID {
 				// Cache locally if store present
 				if s.store != nil {
-					_, _ = s.store.CreateRecord(&rec, nil, nil)
+					_, _ = s.store.UpsertReplicatedRecord(&rec, nil, nil)
 				}
 				return &rec, nil
 			}
@@ -498,10 +509,32 @@ func (s *Swarm) ListPeers() []*Peer {
 	return list
 }
 
+// ReplicationPayload is the wire payload for peer-to-peer data replication.
+type ReplicationPayload struct {
+	Record      *storage.Record `json:"record"`
+	FileData    []byte          `json:"file_data,omitempty"`
+	PictureData []byte          `json:"picture_data,omitempty"`
+}
+
 // BroadcastRecord sends a replicated record payload to assigned storage peers.
 func (s *Swarm) BroadcastRecord(rec *storage.Record, storagePeers []string, chunkBytes []byte) error {
+	return s.BroadcastRecordFull(rec, storagePeers, chunkBytes, nil)
+}
+
+// BroadcastRecordFull replicates a record and its attachments to target storage peers.
+func (s *Swarm) BroadcastRecordFull(rec *storage.Record, storagePeers []string, fileBytes, picBytes []byte) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
+	payload := ReplicationPayload{
+		Record:      rec,
+		FileData:    fileBytes,
+		PictureData: picBytes,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
 
 	for _, peerID := range storagePeers {
 		peer, ok := s.peers[peerID]
@@ -509,8 +542,7 @@ func (s *Swarm) BroadcastRecord(rec *storage.Record, storagePeers []string, chun
 			continue
 		}
 		go func(addr string) {
-			payload, _ := json.Marshal(rec)
-			req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/internal/store", addr), bytes.NewReader(payload))
+			req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/internal/store", addr), bytes.NewReader(payloadBytes))
 			if err == nil {
 				req.Header.Set("Content-Type", "application/json")
 				resp, err := s.httpClient.Do(req)

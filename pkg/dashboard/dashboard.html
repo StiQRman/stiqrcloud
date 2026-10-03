@@ -552,7 +552,7 @@
   </div>
 
   <script>
-    let currentPolicy = { free_for_all: false, price_per_gb_month: 100, free_whitelist: [] };
+    let currentPolicy = { free_for_all: true, price_per_gb_month: 100, free_whitelist: [] };
 
     function switchTab(tab) {
       document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
@@ -686,7 +686,7 @@
               <td>${ipDisplay}</td>
               <td class="mono" style="font-size:0.8rem;color:var(--text-muted);">${p.public_addr || p.reticulum_dest || '-'}</td>
               <td>${p.is_public ? '<span class="badge badge-primary">Public</span>' : '<span class="badge badge-warning">Private</span>'}</td>
-              <td>${p.price_per_gb_month} sats</td>
+              <td>${p.price_per_gb_month === 0 ? '<span class="badge badge-success">Free</span>' : (p.price_per_gb_month + ' sats')}</td>
               <td>${latencyStr}</td>
               <td><strong>${p.social_score.toFixed(1)}</strong></td>
             </tr>
