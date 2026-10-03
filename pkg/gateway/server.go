@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -148,6 +150,10 @@ func (s *Server) setupRoutes() {
 
 	// Auditing Trigger API
 	s.mux.HandleFunc("/api/audit/trigger", s.handleAuditTrigger)
+
+	// Binary Download & One-Line Installer API
+	s.mux.HandleFunc("/download/", s.handleDownload)
+	s.mux.HandleFunc("/install.sh", s.handleInstallScript)
 
 	// Dashboard Integration
 	dash := dashboard.NewServer(
@@ -1362,4 +1368,116 @@ func (s *Server) handleDiscoveryPeers(w http.ResponseWriter, r *http.Request) {
 		"total_online": len(peers),
 		"peers":        peers,
 	})
+}
+
+func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
+	filename := strings.TrimPrefix(r.URL.Path, "/download/")
+	filename = strings.Trim(filename, "/")
+	if filename == "" || filename == "testcloud" || filename == "stiqrcloud" {
+		filename = "testcloud-linux-amd64"
+	}
+
+	// Search locations for the requested binary
+	searchPaths := []string{
+		filename,
+		filepath.Join(".", filename),
+		filepath.Join("releases", filename),
+		filepath.Join("releases_storage", filename),
+		filepath.Join("/opt/stiqrhub/releases_storage", filename),
+		filepath.Join("/opt/stiqrcloud", filename),
+		filepath.Join("./testcloud", filename),
+		filepath.Join("./StiQRhub/releases_storage", filename),
+	}
+
+	var foundPath string
+	for _, p := range searchPaths {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			foundPath = p
+			break
+		}
+	}
+
+	if foundPath == "" {
+		http.Error(w, fmt.Sprintf("binary %q not found", filename), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	http.ServeFile(w, r, foundPath)
+}
+
+func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	proto := "https"
+	if r.TLS == nil && !strings.Contains(host, "stiqrnotes.com") {
+		proto = "http"
+	}
+
+	baseURL := fmt.Sprintf("%s://%s", proto, host)
+
+	script := fmt.Sprintf(`#!/usr/bin/env bash
+# ==============================================================================
+# TestCloud Universal One-Line Installer
+# Runs on Linux VMs (Windows WSL, VirtualBox, VMware), PCs, and servers.
+# Zero port forwarding required - connects outbound via Discovery Rendezvous.
+# ==============================================================================
+set -e
+
+echo "=================================================================="
+echo "          Installing TestCloud Decentralized Node                 "
+echo "=================================================================="
+
+ARCH="$(uname -m)"
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+
+if [ "$OS" != "linux" ]; then
+  echo "Error: Linux required. Detected: $OS"
+  exit 1
+fi
+
+BIN_FILE="testcloud-linux-amd64"
+case "$ARCH" in
+  x86_64|amd64)
+    BIN_FILE="testcloud-linux-amd64"
+    echo "-> Architecture: Linux x86_64"
+    ;;
+  aarch64|arm64)
+    BIN_FILE="testcloud-linux-arm64"
+    echo "-> Architecture: Linux ARM64"
+    ;;
+  *)
+    echo "Warning: Architecture $ARCH, defaulting to x86_64"
+    ;;
+esac
+
+DEST_DIR="$HOME/.testcloud"
+mkdir -p "$DEST_DIR"
+TARGET_BIN="$DEST_DIR/testcloud"
+
+echo "-> Downloading static binary from %s..."
+curl -sSLf "%s/download/$BIN_FILE" -o "$TARGET_BIN" || curl -sSLf "%s/download/testcloud" -o "$TARGET_BIN"
+chmod +x "$TARGET_BIN"
+
+NODE_NAME="${TESTCLOUD_NAME:-FriendNode-$(hostname -s 2>/dev/null || echo "VM")-$RANDOM}"
+DISCOVERY_URL="%s"
+
+echo "=================================================================="
+echo "-> Starting TestCloud node '$NODE_NAME'..."
+echo "-> Connecting to discovery rendezvous: $DISCOVERY_URL"
+echo "-> Private Dashboard active at: http://localhost:8100/dashboard"
+echo "=================================================================="
+
+exec "$TARGET_BIN" \
+  -host 0.0.0.0 \
+  -port 8100 \
+  -discovery-url "$DISCOVERY_URL" \
+  -peers "$DISCOVERY_URL" \
+  -data-dir "$DEST_DIR/data" \
+  -name "$NODE_NAME"
+`, baseURL, baseURL, baseURL, baseURL)
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(script))
 }
