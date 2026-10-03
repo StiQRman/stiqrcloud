@@ -294,8 +294,10 @@
         <h1>TestCloud DB</h1>
         <span class="badge badge-primary" id="version-tag">v0.1.0</span>
         <span class="badge badge-rns" id="rns-badge">RNS: Connecting</span>
+        <span id="node-name-badge" class="badge" style="background:#21262d;color:var(--accent);font-weight:600;">Node: loading...</span>
       </div>
-      <div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span id="node-ip-badge" class="badge mono" style="display:none;background:rgba(56,189,248,0.12);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);">WAN IP: -</span>
         <span class="badge badge-success" id="mode-badge">Database-First</span>
       </div>
     </header>
@@ -373,12 +375,12 @@
           <thead>
             <tr>
               <th>Status</th>
-              <th>Node ID</th>
-              <th>Address / Reticulum</th>
+              <th>Node Name</th>
+              <th>Location</th>
+              <th>Public IP</th>
+              <th>Endpoint / Reticulum</th>
               <th>Type</th>
               <th>Price (Sats/GB/Mo)</th>
-              <th>Audits Passed</th>
-              <th>Audits Performed</th>
               <th>Latency</th>
               <th>Social Score</th>
             </tr>
@@ -566,6 +568,20 @@
 
         document.getElementById('version-tag').innerText = data.version;
         document.getElementById('settings-cur-ver').innerText = data.version;
+
+        if (data.operator_name) {
+          const locStr = data.operator_location ? ` (${data.operator_location})` : '';
+          document.getElementById('node-name-badge').textContent = `${data.operator_name}${locStr}`;
+        } else {
+          document.getElementById('node-name-badge').textContent = data.node_id;
+        }
+        if (data.public_ip) {
+          document.getElementById('node-ip-badge').textContent = `Public IP: ${data.public_ip}`;
+          document.getElementById('node-ip-badge').style.display = 'inline-block';
+        } else {
+          document.getElementById('node-ip-badge').style.display = 'none';
+        }
+
         document.getElementById('stat-records').innerText = data.storage.record_count;
         document.getElementById('stat-storage').innerText = (data.storage.used_bytes / 1024).toFixed(1) + ' KB';
         document.getElementById('stat-mode').innerText = data.mode;
@@ -659,15 +675,18 @@
               : '<span class="badge badge-danger" style="background:rgba(248,81,73,0.2);color:#ff7b72;border:1px solid #f85149;display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f85149;"></span>OFFLINE</span>';
             const rowStyle = isOnline ? '' : 'style="opacity:0.65;background:rgba(248,81,73,0.06);"';
             const latencyStr = isOnline ? (p.avg_latency_ms > 0 ? p.avg_latency_ms.toFixed(1) + ' ms' : '< 1 ms') : '<span style="color:#ff7b72;">Unreachable</span>';
+            const nameDisplay = p.name ? `<strong>${p.name}</strong> <span style="font-size:0.75rem;color:var(--text-muted);">(${p.node_id})</span>` : `<strong>${p.node_id}</strong>`;
+            const locDisplay = p.location ? `<span>${p.location}</span>` : `<span style="color:var(--text-muted);">-</span>`;
+            const ipDisplay = p.public_ip ? `<span class="mono" style="color:var(--accent); font-weight:600;">${p.public_ip}</span>` : `<span class="mono" style="color:var(--text-muted);">${p.public_addr || '-'}</span>`;
             return `
             <tr ${rowStyle}>
               <td>${statusBadge}</td>
-              <td class="mono"><strong>${p.node_id}</strong></td>
-              <td class="mono">${p.public_addr || p.reticulum_dest || '-'}</td>
+              <td class="mono">${nameDisplay}</td>
+              <td>${locDisplay}</td>
+              <td>${ipDisplay}</td>
+              <td class="mono" style="font-size:0.8rem;color:var(--text-muted);">${p.public_addr || p.reticulum_dest || '-'}</td>
               <td>${p.is_public ? '<span class="badge badge-primary">Public</span>' : '<span class="badge badge-warning">Private</span>'}</td>
               <td>${p.price_per_gb_month} sats</td>
-              <td>${p.audits_passed}</td>
-              <td>${p.audits_performed}</td>
               <td>${latencyStr}</td>
               <td><strong>${p.social_score.toFixed(1)}</strong></td>
             </tr>

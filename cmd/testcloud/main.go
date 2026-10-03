@@ -38,10 +38,11 @@ func main() {
 
 	// Compatibility flags for StiQRcloud drop-in replacement
 	name := flag.String("name", "Node Operator", "Operator display nickname")
-	_ = flag.String("location", "Home Network", "Operator geographic location")
+	location := flag.String("location", "Home Network", "Operator geographic location")
+	publicIP := flag.String("public-ip", "", "Explicit public WAN IP")
 	publicAddr := flag.String("public-addr", "", "Public reachable IP and port for P2P traffic")
 	gatewayURL := flag.String("gateway-url", "", "Public HTTP/HTTPS Gateway URL for mobile apps")
-	_ = flag.String("discovery-url", "", "Public internet discovery URL")
+	discoveryURL := flag.String("discovery-url", "", "Public internet discovery URL")
 	_ = flag.Int("p2p-port", 9100, "P2P swarm communication port")
 	flag.Parse()
 
@@ -93,18 +94,32 @@ func main() {
 	if *gatewayURL != "" {
 		listenAddr = strings.TrimRight(*gatewayURL, "/")
 	} else if *publicAddr != "" {
-		listenAddr = strings.TrimRight(*publicAddr, "/")
+		addr := strings.TrimRight(*publicAddr, "/")
+		if !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
+			addr = "http://" + addr
+		}
+		listenAddr = addr
 	}
 	swarm := p2p.NewSwarm(*nodeID, listenAddr, store)
 	swarm.SetIdentity(rnsDest, *isPublic, *price)
+	swarm.SetMetadata(*name, *location, *publicIP)
+
 	if *peers != "" && !*standalone {
 		for _, pURL := range strings.Split(*peers, ",") {
 			pURL = strings.TrimSpace(pURL)
 			if pURL != "" && pURL != listenAddr {
+				if !strings.HasPrefix(pURL, "http://") && !strings.HasPrefix(pURL, "https://") {
+					pURL = "http://" + pURL
+				}
 				swarm.AddBootstrapPeer(pURL)
 			}
 		}
 	}
+
+	if *discoveryURL != "" && !*standalone {
+		swarm.StartDiscovery(*discoveryURL, 3*time.Second)
+	}
+
 	escrowMgr := escrow.NewManager(*nodeID, *price, absDataDir)
 	auditorCoord := audit.NewCoordinator(*nodeID, store, escrowMgr, swarm)
 
@@ -118,6 +133,9 @@ func main() {
 
 	gw := gateway.NewServer(gateway.Config{
 		NodeID:     *nodeID,
+		Name:       *name,
+		Location:   *location,
+		PublicIP:   *publicIP,
 		Store:      store,
 		Swarm:      swarm,
 		EscrowMgr:  escrowMgr,

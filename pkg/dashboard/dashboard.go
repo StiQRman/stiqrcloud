@@ -21,6 +21,9 @@ var DashboardHTML string
 // Server provides the local web dashboard.
 type Server struct {
 	nodeID     string
+	name       string
+	location   string
+	publicIP   string
 	store      *storage.Store
 	swarm      *p2p.Swarm
 	escrowMgr  *escrow.Manager
@@ -33,6 +36,9 @@ type Server struct {
 // NewServer initializes the dashboard server.
 func NewServer(
 	nodeID string,
+	name string,
+	location string,
+	publicIP string,
 	store *storage.Store,
 	swarm *p2p.Swarm,
 	escrowMgr *escrow.Manager,
@@ -43,6 +49,9 @@ func NewServer(
 ) *Server {
 	return &Server{
 		nodeID:     nodeID,
+		name:       name,
+		location:   location,
+		publicIP:   publicIP,
 		store:      store,
 		swarm:      swarm,
 		escrowMgr:  escrowMgr,
@@ -100,6 +109,9 @@ func (s *Server) handleStatsJSON(w http.ResponseWriter, r *http.Request) {
 		"app_name":           version.AppName,
 		"version":            version.CurrentVersion,
 		"node_id":            s.nodeID,
+		"operator_name":      s.name,
+		"operator_location":  s.location,
+		"public_ip":          s.publicIP,
 		"mode":               mode,
 		"is_public":          s.isPublic,
 		"reticulum_dest":     s.rnsDest,

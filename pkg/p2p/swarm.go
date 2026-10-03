@@ -19,6 +19,9 @@ import (
 // Peer represents a database node on the mesh.
 type Peer struct {
 	NodeID          string    `json:"node_id"`
+	Name            string    `json:"name,omitempty"`
+	Location        string    `json:"location,omitempty"`
+	PublicIP        string    `json:"public_ip,omitempty"`
 	PublicAddr      string    `json:"public_addr"`
 	ReticulumDest   string    `json:"reticulum_dest,omitempty"`
 	IsPublic        bool      `json:"is_public"`
@@ -36,14 +39,19 @@ type Swarm struct {
 	mu             sync.RWMutex
 	localID        string
 	localAddr      string
+	name           string
+	location       string
+	publicIP       string
 	rnsDest        string
 	isPublic       bool
 	price          int64
+	discoveryURL   string
 	bootstrapPeers []string
 	peers          map[string]*Peer
 	httpClient     *http.Client
 	rng            *rand.Rand
 	store          *storage.Store
+	stopDiscovery  chan struct{}
 }
 
 // NewSwarm initializes a peer mesh swarm.
@@ -68,6 +76,119 @@ func (s *Swarm) SetIdentity(rnsDest string, isPublic bool, price int64) {
 	s.price = price
 }
 
+// SetMetadata configures friendly display metadata (Name, Location, PublicIP).
+func (s *Swarm) SetMetadata(name, location, publicIP string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.name = name
+	s.location = location
+	s.publicIP = publicIP
+}
+
+// StartDiscovery launches a recurring background rendezvous announcement to discoveryURL.
+func (s *Swarm) StartDiscovery(discoveryURL string, interval time.Duration) {
+	s.mu.Lock()
+	s.discoveryURL = strings.TrimRight(discoveryURL, "/")
+	if s.stopDiscovery != nil {
+		close(s.stopDiscovery)
+	}
+	s.stopDiscovery = make(chan struct{})
+	discURL := s.discoveryURL
+	s.mu.Unlock()
+
+	if discURL == "" {
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		// Initial announcement
+		s.announceToDiscovery()
+
+		for {
+			select {
+			case <-ticker.C:
+				s.announceToDiscovery()
+			case <-s.stopDiscovery:
+				return
+			}
+		}
+	}()
+}
+
+func (s *Swarm) announceToDiscovery() {
+	s.mu.RLock()
+	discURL := s.discoveryURL
+	localID := s.localID
+	localAddr := s.localAddr
+	name := s.name
+	loc := s.location
+	pubIP := s.publicIP
+	rnsDest := s.rnsDest
+	isPub := s.isPublic
+	price := s.price
+	s.mu.RUnlock()
+
+	if discURL == "" {
+		return
+	}
+
+	payload := map[string]interface{}{
+		"peer_id":            localID,
+		"node_id":            localID,
+		"name":               name,
+		"nickname":           name,
+		"location":           loc,
+		"public_ip":          pubIP,
+		"public_addr":        localAddr,
+		"reticulum_dest":     rnsDest,
+		"is_public":          isPub,
+		"price_per_gb_month": price,
+		"role":               "dual",
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Post(discURL+"/api/discovery/announce", "application/json", bytes.NewReader(data))
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return
+	}
+
+	var discResp struct {
+		TotalOnline int     `json:"total_online"`
+		Peers       []*Peer `json:"peers"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &discResp); err == nil && len(discResp.Peers) > 0 {
+		for _, p := range discResp.Peers {
+			if p.NodeID != localID && p.PublicAddr != localAddr && p.PublicAddr != "" {
+				s.RegisterPeer(p)
+			}
+		}
+	} else {
+		var peerList []*Peer
+		if err := json.Unmarshal(bodyBytes, &peerList); err == nil {
+			for _, p := range peerList {
+				if p.NodeID != localID && p.PublicAddr != localAddr && p.PublicAddr != "" {
+					s.RegisterPeer(p)
+				}
+			}
+		}
+	}
+}
+
 // AddBootstrapPeer registers a persistent bootstrap peer URL for recurring gossip discovery.
 func (s *Swarm) AddBootstrapPeer(addr string) {
 	s.mu.Lock()
@@ -88,6 +209,36 @@ func (s *Swarm) AddBootstrapPeer(addr string) {
 func (s *Swarm) RegisterPeer(p *Peer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	existing, exists := s.peers[p.NodeID]
+	if exists {
+		existing.IsOnline = true
+		existing.LastSeen = time.Now().UTC()
+		if p.Name != "" {
+			existing.Name = p.Name
+		}
+		if p.Location != "" {
+			existing.Location = p.Location
+		}
+		if p.PublicIP != "" {
+			existing.PublicIP = p.PublicIP
+		}
+		if p.PublicAddr != "" {
+			existing.PublicAddr = p.PublicAddr
+		}
+		if p.ReticulumDest != "" {
+			existing.ReticulumDest = p.ReticulumDest
+		}
+		if p.PricePerGBMonth > 0 {
+			existing.PricePerGBMonth = p.PricePerGBMonth
+		}
+		if p.AvgLatencyMs > 0 {
+			existing.AvgLatencyMs = p.AvgLatencyMs
+		}
+		existing.IsPublic = p.IsPublic
+		s.calculateSocialScore(existing)
+		return
+	}
 
 	p.IsOnline = true
 	p.LastSeen = time.Now().UTC()
@@ -409,6 +560,9 @@ func (s *Swarm) ConnectPeer(peerURL string, rnsDest string, isPublic bool, price
 	// 2. Announce local node to remote peer
 	selfPeer := &Peer{
 		NodeID:          s.localID,
+		Name:            s.name,
+		Location:        s.location,
+		PublicIP:        s.publicIP,
 		PublicAddr:      s.localAddr,
 		ReticulumDest:   rnsDest,
 		IsPublic:        isPublic,
@@ -462,6 +616,9 @@ func (s *Swarm) GossipPeers() {
 	rnsDest := s.rnsDest
 	isPublic := s.isPublic
 	price := s.price
+	name := s.name
+	location := s.location
+	publicIP := s.publicIP
 	s.mu.RUnlock()
 
 	seen := make(map[string]bool)
@@ -480,6 +637,9 @@ func (s *Swarm) GossipPeers() {
 		// 1. Announce self to target and receive their peer list
 		selfPeer := &Peer{
 			NodeID:          s.localID,
+			Name:            name,
+			Location:        location,
+			PublicIP:        publicIP,
 			PublicAddr:      s.localAddr,
 			ReticulumDest:   rnsDest,
 			IsPublic:        isPublic,
@@ -553,7 +713,18 @@ func (s *Swarm) ProbePeers() {
 		start := time.Now()
 		resp, err := client.Get(fmt.Sprintf("%s/api/health", pc.addr))
 		if err == nil && resp.StatusCode == http.StatusOK {
+			var h struct {
+				NodeID string `json:"node_id"`
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&h)
 			_ = resp.Body.Close()
+
+			if h.NodeID != "" && h.NodeID != pc.nodeID {
+				// Prevent self-loopback false positive
+				s.MarkPeerOffline(pc.nodeID)
+				continue
+			}
+
 			latencyMs := float64(time.Since(start).Milliseconds())
 			s.mu.Lock()
 			if p, ok := s.peers[pc.nodeID]; ok {

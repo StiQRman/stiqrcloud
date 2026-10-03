@@ -20,6 +20,9 @@ import (
 // Server coordinates HTTP API routing and services.
 type Server struct {
 	nodeID     string
+	name       string
+	location   string
+	publicIP   string
 	store      *storage.Store
 	swarm      *p2p.Swarm
 	escrowMgr  *escrow.Manager
@@ -34,6 +37,9 @@ type Server struct {
 // Config holds gateway server options.
 type Config struct {
 	NodeID     string
+	Name       string
+	Location   string
+	PublicIP   string
 	Store      *storage.Store
 	Swarm      *p2p.Swarm
 	EscrowMgr  *escrow.Manager
@@ -48,6 +54,9 @@ type Config struct {
 func NewServer(cfg Config) *Server {
 	s := &Server{
 		nodeID:     cfg.NodeID,
+		name:       cfg.Name,
+		location:   cfg.Location,
+		publicIP:   cfg.PublicIP,
 		store:      cfg.Store,
 		swarm:      cfg.Swarm,
 		escrowMgr:  cfg.EscrowMgr,
@@ -128,6 +137,9 @@ func (s *Server) setupRoutes() {
 	// Dashboard Integration
 	dash := dashboard.NewServer(
 		s.nodeID,
+		s.name,
+		s.location,
+		s.publicIP,
 		s.store,
 		s.swarm,
 		s.escrowMgr,
@@ -1136,10 +1148,17 @@ func (s *Server) handleDiscoveryAnnounce(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req struct {
-		PeerID     string `json:"peer_id"`
-		NodeID     string `json:"node_id"`
-		PublicAddr string `json:"public_addr"`
-		Role       string `json:"role"`
+		PeerID          string `json:"peer_id"`
+		NodeID          string `json:"node_id"`
+		Name            string `json:"name"`
+		Nickname        string `json:"nickname"`
+		Location        string `json:"location"`
+		PublicIP        string `json:"public_ip"`
+		PublicAddr      string `json:"public_addr"`
+		ReticulumDest   string `json:"reticulum_dest"`
+		IsPublic        bool   `json:"is_public"`
+		PricePerGBMonth int64  `json:"price_per_gb_month"`
+		Role            string `json:"role"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1151,13 +1170,23 @@ func (s *Server) handleDiscoveryAnnounce(w http.ResponseWriter, r *http.Request)
 	if id == "" {
 		id = req.NodeID
 	}
+	name := req.Name
+	if name == "" {
+		name = req.Nickname
+	}
 
 	if s.swarm != nil && id != "" && id != s.nodeID {
 		s.swarm.RegisterPeer(&p2p.Peer{
-			NodeID:     id,
-			PublicAddr: req.PublicAddr,
-			IsOnline:   true,
-			LastSeen:   time.Now(),
+			NodeID:          id,
+			Name:            name,
+			Location:        req.Location,
+			PublicIP:        req.PublicIP,
+			PublicAddr:      req.PublicAddr,
+			ReticulumDest:   req.ReticulumDest,
+			IsPublic:        req.IsPublic,
+			PricePerGBMonth: req.PricePerGBMonth,
+			IsOnline:        true,
+			LastSeen:        time.Now().UTC(),
 		})
 	}
 
@@ -1168,8 +1197,9 @@ func (s *Server) handleDiscoveryAnnounce(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "registered",
-		"peers":  peers,
+		"status":       "registered",
+		"total_online": len(peers),
+		"peers":        peers,
 	})
 }
 
@@ -1180,5 +1210,8 @@ func (s *Server) handleDiscoveryPeers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(peers)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_online": len(peers),
+		"peers":        peers,
+	})
 }
