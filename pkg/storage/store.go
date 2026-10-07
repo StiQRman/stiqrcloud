@@ -290,6 +290,16 @@ func (s *Store) GetChunk(hash string) ([]byte, error) {
 	return data, nil
 }
 
+// HasChunk checks whether a chunk exists on disk without loading it into memory.
+func (s *Store) HasChunk(hash string) bool {
+	if hash == "" {
+		return false
+	}
+	chunkPath := filepath.Join(s.chunksDir, hash)
+	fi, err := os.Stat(chunkPath)
+	return err == nil && !fi.IsDir()
+}
+
 // CreateRecord persists a new record. If DataID is empty, it generates a permanent DataID.
 func (s *Store) CreateRecord(rec *Record, fileData []byte, picData []byte) (*Record, error) {
 	s.mu.Lock()

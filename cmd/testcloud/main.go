@@ -125,9 +125,21 @@ func main() {
 	escrowMgr := escrow.NewManager(*nodeID, *price, absDataDir)
 	auditorCoord := audit.NewCoordinator(*nodeID, store, escrowMgr, swarm)
 
+	// Hook to ensure locally pulled replica records register in local escrow manager
+	swarm.SetOnRecordSynced(func(rec *storage.Record) {
+		if escrowMgr != nil && rec != nil {
+			rates := make(map[string]int64)
+			for _, st := range rec.StoragePeers {
+				rates[st] = 100
+			}
+			_, _ = escrowMgr.CreateContract(rec.DataID, rec.UserPubAddress, rec.TotalBytes, 1, rates, rec.AuditorPeers)
+		}
+	})
+
 	// 4. Initialize Gateway & Dashboard Server
 	if !*standalone {
 		swarm.StartLivenessLoop(3 * time.Second)
+		swarm.StartSyncLoop(10 * time.Second)
 	}
 	if *isPublic && !*standalone {
 		auditorCoord.StartAuditLoop(6 * time.Second)

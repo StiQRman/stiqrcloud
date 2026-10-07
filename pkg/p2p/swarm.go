@@ -52,6 +52,9 @@ type Swarm struct {
 	rng            *rand.Rand
 	store          *storage.Store
 	stopDiscovery  chan struct{}
+	onRecordSynced func(rec *storage.Record)
+	stopSync       chan struct{}
+	syncing        sync.Mutex
 }
 
 // NewSwarm initializes a peer mesh swarm.
@@ -61,7 +64,7 @@ func NewSwarm(localID, localAddr string, store *storage.Store) *Swarm {
 		localAddr:      localAddr,
 		peers:          make(map[string]*Peer),
 		bootstrapPeers: []string{},
-		httpClient:     &http.Client{Timeout: 2 * time.Second},
+		httpClient:     &http.Client{Timeout: 5 * time.Second},
 		rng:            rand.New(rand.NewSource(time.Now().UnixNano())),
 		store:          store,
 	}
@@ -187,6 +190,12 @@ func (s *Swarm) announceToDiscovery() {
 			}
 		}
 	}
+
+	// Trigger async sync upon receiving peers from discovery
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_, _ = s.SyncRecordsFromPeers()
+	}()
 }
 
 // AddBootstrapPeer registers a persistent bootstrap peer URL for recurring gossip discovery.
@@ -215,8 +224,8 @@ func (s *Swarm) RegisterDirectPeer(p *Peer) {
 		return
 	}
 
-	// Never accept 0.0.0.0 or loopback as a peer's public address
-	if strings.Contains(p.PublicAddr, "0.0.0.0") || strings.Contains(p.PublicAddr, "127.0.0.1") || strings.Contains(p.PublicAddr, "localhost") {
+	// Never accept 0.0.0.0 or self-loopback as a peer's public address
+	if strings.Contains(p.PublicAddr, "0.0.0.0") || (s.localAddr != "" && p.PublicAddr == s.localAddr) {
 		p.PublicAddr = ""
 	}
 
@@ -265,8 +274,8 @@ func (s *Swarm) RegisterPeer(p *Peer) {
 		return
 	}
 
-	// Never accept 0.0.0.0 or loopback as a peer's public address
-	if strings.Contains(p.PublicAddr, "0.0.0.0") || strings.Contains(p.PublicAddr, "127.0.0.1") || strings.Contains(p.PublicAddr, "localhost") {
+	// Never accept 0.0.0.0 or self-loopback as a peer's public address
+	if strings.Contains(p.PublicAddr, "0.0.0.0") || (s.localAddr != "" && p.PublicAddr == s.localAddr) {
 		p.PublicAddr = ""
 	}
 
@@ -906,4 +915,211 @@ func (s *Swarm) StartLivenessLoop(interval time.Duration) {
 		}
 	}()
 }
+
+// TouchPeer refreshes a peer's heartbeat and marks them online.
+func (s *Swarm) TouchPeer(nodeID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p, ok := s.peers[nodeID]; ok {
+		p.IsOnline = true
+		p.LastSeen = time.Now().UTC()
+	}
+}
+
+// SetOnRecordSynced sets a callback hook invoked when a record is successfully pulled and stored.
+func (s *Swarm) SetOnRecordSynced(hook func(*storage.Record)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onRecordSynced = hook
+}
+
+func (s *Swarm) downloadChunk(baseURL, hash string) ([]byte, error) {
+	if hash == "" {
+		return nil, errors.New("empty chunk hash")
+	}
+	url := fmt.Sprintf("%s/api/chunks/%s", strings.TrimRight(baseURL, "/"), hash)
+	resp, err := s.httpClient.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("chunk download returned HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+func (s *Swarm) syncFromEndpoint(targetURL string) (int, error) {
+	targetURL = strings.TrimRight(targetURL, "/")
+	if targetURL == "" || targetURL == s.localAddr {
+		return 0, nil
+	}
+
+	url := fmt.Sprintf("%s/api/sync/records?peer_id=%s", targetURL, s.localID)
+	resp, err := s.httpClient.Get(url)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		// Fallback to /api/records for backward compatibility with older nodes
+		url = fmt.Sprintf("%s/api/records", targetURL)
+		respFallback, err := s.httpClient.Get(url)
+		if err != nil {
+			return 0, err
+		}
+		defer respFallback.Body.Close()
+		resp = respFallback
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("sync returned HTTP %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+
+	var syncResp struct {
+		Records []*storage.Record `json:"records"`
+		Total   int               `json:"total"`
+	}
+	if err := json.Unmarshal(bodyBytes, &syncResp); err != nil {
+		return 0, err
+	}
+
+	if s.store == nil || len(syncResp.Records) == 0 {
+		return 0, nil
+	}
+
+	synced := 0
+	for _, rec := range syncResp.Records {
+		if rec == nil || rec.DataID == "" {
+			continue
+		}
+
+		// Check if we already have this record version and its chunks
+		existing, err := s.store.GetRecord(rec.DataID)
+		if err == nil && existing != nil && existing.Version >= rec.Version {
+			hasFile := rec.FileChunkHash == "" || s.store.HasChunk(rec.FileChunkHash)
+			hasPic := rec.PictureChunkHash == "" || s.store.HasChunk(rec.PictureChunkHash)
+			if hasFile && hasPic {
+				continue // Already fully cached
+			}
+		}
+
+		var fileBytes, picBytes []byte
+		if rec.FileChunkHash != "" {
+			if s.store.HasChunk(rec.FileChunkHash) {
+				if chunk, err := s.store.GetChunk(rec.FileChunkHash); err == nil {
+					fileBytes = chunk
+				}
+			} else {
+				if chunk, err := s.downloadChunk(targetURL, rec.FileChunkHash); err == nil {
+					fileBytes = chunk
+				}
+			}
+		}
+
+		if rec.PictureChunkHash != "" {
+			if s.store.HasChunk(rec.PictureChunkHash) {
+				if chunk, err := s.store.GetChunk(rec.PictureChunkHash); err == nil {
+					picBytes = chunk
+				}
+			} else {
+				if chunk, err := s.downloadChunk(targetURL, rec.PictureChunkHash); err == nil {
+					picBytes = chunk
+				}
+			}
+		}
+
+		stored, err := s.store.UpsertReplicatedRecord(rec, fileBytes, picBytes)
+		if err == nil && stored != nil {
+			synced++
+			s.mu.RLock()
+			hook := s.onRecordSynced
+			s.mu.RUnlock()
+			if hook != nil {
+				hook(stored)
+			}
+		}
+	}
+
+	return synced, nil
+}
+
+// SyncRecordsFromPeers contacts all discovery and bootstrap endpoints to pull missing records and chunks.
+func (s *Swarm) SyncRecordsFromPeers() (int, error) {
+	if !s.syncing.TryLock() {
+		return 0, nil // sync already in flight
+	}
+	defer s.syncing.Unlock()
+
+	s.mu.RLock()
+	var targets []string
+	if s.discoveryURL != "" {
+		targets = append(targets, s.discoveryURL)
+	}
+	targets = append(targets, s.bootstrapPeers...)
+	for _, p := range s.peers {
+		if p.PublicAddr != "" && p.PublicAddr != s.localAddr {
+			targets = append(targets, p.PublicAddr)
+		}
+	}
+	s.mu.RUnlock()
+
+	seen := make(map[string]bool)
+	totalSynced := 0
+	for _, t := range targets {
+		t = strings.TrimRight(t, "/")
+		if t == "" || seen[t] || t == s.localAddr {
+			continue
+		}
+		seen[t] = true
+		n, _ := s.syncFromEndpoint(t)
+		totalSynced += n
+	}
+
+	return totalSynced, nil
+}
+
+// StartSyncLoop starts periodic background edge pull sync.
+func (s *Swarm) StartSyncLoop(interval time.Duration) {
+	s.mu.Lock()
+	if s.stopSync != nil {
+		close(s.stopSync)
+	}
+	s.stopSync = make(chan struct{})
+	stopCh := s.stopSync
+	s.mu.Unlock()
+
+	go func() {
+		time.Sleep(1 * time.Second)
+		_, _ = s.SyncRecordsFromPeers()
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				_, _ = s.SyncRecordsFromPeers()
+			case <-stopCh:
+				return
+			}
+		}
+	}()
+}
+
+// StopSyncLoop halts the background sync loop.
+func (s *Swarm) StopSyncLoop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopSync != nil {
+		close(s.stopSync)
+		s.stopSync = nil
+	}
+}
+
 

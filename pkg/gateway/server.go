@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -144,6 +145,10 @@ func (s *Server) setupRoutes() {
 
 	// Internal Replication Storage
 	s.mux.HandleFunc("/api/internal/store", s.handleInternalStore)
+
+	// Edge Node Sync & Content-Addressed Chunk Distribution API
+	s.mux.HandleFunc("/api/sync/records", s.handleSyncRecords)
+	s.mux.HandleFunc("/api/chunks/", s.handleChunks)
 
 	// Escrow & Storage Monetization API
 	s.mux.HandleFunc("/api/escrow/policy", s.handleEscrowPolicy)
@@ -305,6 +310,180 @@ func (s *Server) handleInternalStore(w http.ResponseWriter, r *http.Request) {
 		"data_id": stored.DataID,
 		"version": stored.Version,
 	})
+}
+
+func (s *Server) handleSyncRecords(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	peerID := r.URL.Query().Get("peer_id")
+	sinceStr := r.URL.Query().Get("since")
+	all := r.URL.Query().Get("all") == "true"
+	limit := 200
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		if parsed, err := strconv.Atoi(lStr); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	var since time.Time
+	if sinceStr != "" {
+		since, _ = time.Parse(time.RFC3339, sinceStr)
+	}
+
+	if s.store == nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"records":   []*storage.Record{},
+			"total":     0,
+			"timestamp": time.Now().UTC(),
+		})
+		return
+	}
+
+	if peerID != "" && s.swarm != nil {
+		s.swarm.TouchPeer(peerID)
+	}
+
+	allRecords := s.store.ListAllRecords()
+	var assigned []*storage.Record
+
+	for _, rec := range allRecords {
+		if rec == nil {
+			continue
+		}
+		if !since.IsZero() && !rec.UpdatedAt.After(since) {
+			continue
+		}
+
+		isAssigned := false
+		if all || peerID == "" {
+			isAssigned = true
+		} else {
+			for _, sp := range rec.StoragePeers {
+				if sp == peerID {
+					isAssigned = true
+					break
+				}
+			}
+			if !isAssigned {
+				for _, ap := range rec.AuditorPeers {
+					if ap == peerID {
+						isAssigned = true
+						break
+					}
+				}
+			}
+		}
+
+		if isAssigned {
+			assigned = append(assigned, rec)
+		}
+	}
+
+	// Dynamic Quorum Backfill:
+	// If peerID was specified and has fewer than 20 assigned records,
+	// look for records that have < 3 storage peers or auto/stale peers, and assign peerID!
+	if peerID != "" && !all && len(assigned) < 20 {
+		for _, rec := range allRecords {
+			if len(assigned) >= limit {
+				break
+			}
+			alreadyIn := false
+			for _, sp := range rec.StoragePeers {
+				if sp == peerID {
+					alreadyIn = true
+					break
+				}
+			}
+			if alreadyIn {
+				continue
+			}
+
+			// Check if rec needs a storage peer
+			hasAuto := false
+			for _, sp := range rec.StoragePeers {
+				if strings.Contains(sp, "auto") {
+					hasAuto = true
+					break
+				}
+			}
+			if len(rec.StoragePeers) < 3 || hasAuto {
+				newStorage := make([]string, 0, len(rec.StoragePeers)+1)
+				replaced := false
+				for _, sp := range rec.StoragePeers {
+					if strings.Contains(sp, "auto") && !replaced {
+						newStorage = append(newStorage, peerID)
+						replaced = true
+					} else {
+						newStorage = append(newStorage, sp)
+					}
+				}
+				if !replaced && len(newStorage) < 3 {
+					newStorage = append(newStorage, peerID)
+				}
+				rec.StoragePeers = newStorage
+				_ = s.store.SaveRecord(rec)
+				assigned = append(assigned, rec)
+			}
+		}
+	}
+
+	// If assigned is still empty and peerID is specified, return active records
+	// so newly connected edge node immediately receives mesh data to replicate!
+	if len(assigned) == 0 && len(allRecords) > 0 {
+		for _, rec := range allRecords {
+			if !since.IsZero() && !rec.UpdatedAt.After(since) {
+				continue
+			}
+			assigned = append(assigned, rec)
+			if len(assigned) >= limit {
+				break
+			}
+		}
+	}
+
+	if len(assigned) > limit {
+		assigned = assigned[:limit]
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"records":   assigned,
+		"total":     len(assigned),
+		"timestamp": time.Now().UTC(),
+	})
+}
+
+func (s *Server) handleChunks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	hash := strings.TrimPrefix(r.URL.Path, "/api/chunks/")
+	hash = strings.Trim(hash, "/")
+	if hash == "" {
+		http.Error(w, "missing chunk hash", http.StatusBadRequest)
+		return
+	}
+
+	if s.store == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	chunk, err := s.store.GetChunk(hash)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(len(chunk)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(chunk)
 }
 
 // replicateAndEngageQuorum selects healthy storage peers if needed, creates/updates the contract, and broadcasts replicas.

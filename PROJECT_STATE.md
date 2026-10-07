@@ -246,13 +246,24 @@
      - When any node joins via a bootstrap node (e.g. Node 1 Alpha), it recursively discovers all other peers on the mesh, connects to them directly, and registers bidirectional announcements via `POST /api/peers`.
      - Verified across all nodes (`Beta`, `Gamma`, `Delta`, `Epsilon`, `Zeta`): every dashboard displays the entire 6-node network with live status indicators, even if nodes only booted with a single bootstrap peer flag.
 
-### Planned Next Steps for Tomorrow
-1. **Interactive Escrow Settlement & Audit Challenge Loop**:
+- **Phase 7: Edge Node NAT Pull Sync & Content-Addressed Chunk Distribution (Completed & Verified)**:
+  - **Problem Solved**: Edge nodes running behind residential NAT/firewalls (e.g. friend's computer without port forwarding) advertise empty `PublicAddr: ""` to prevent loopback port collisions. Inbound push replication (`POST /api/internal/store`) was unable to reach them through home firewalls, leaving connected edge nodes with 0 records.
+  - **Gateway Sync API (`GET /api/sync/records`)**: Added dedicated pull sync endpoint in [`pkg/gateway/server.go`](pkg/gateway/server.go) supporting `peer_id`, `since`, and `limit` query parameters with dynamic quorum backfilling for newly connected edge nodes.
+  - **Content-Addressed Chunk Distribution (`GET /api/chunks/{hash}`)**: Added direct chunk retrieval endpoint in [`pkg/gateway/server.go`](pkg/gateway/server.go) and [`pkg/storage/store.go`](pkg/storage/store.go) enabling edge nodes to fetch raw file and picture chunks by hash without full record parsing.
+  - **Autonomous Client Pull Sync Loop**: Implemented `SyncRecordsFromPeers()` and `StartSyncLoop()` in [`pkg/p2p/swarm.go`](pkg/p2p/swarm.go) and [`cmd/testcloud/main.go`](cmd/testcloud/main.go). Runs an immediate sync on bootstrap/discovery connection and periodic checks every 10 seconds.
+  - **Idempotence & Caching**: Edge node inspects local store (`GetRecord` and `HasChunk`) before downloading chunks, ensuring zero network or CPU overhead when data is already mirrored.
+  - **Verification**:
+    - Integration test `TestEdgeNodeNATPullSync` passing in [`pkg/gateway/server_test.go`](pkg/gateway/server_test.go).
+    - Multi-process CLI end-to-end binary tests verified record and chunk replication from Gateway to NAT Edge Node.
+    - All release static binaries compiled and archived (`testcloud`, `testcloud-linux-amd64`, `testcloud-linux-arm64`, `testcloud-windows-amd64.exe`).
+
+### Planned Next Steps
+1. **Physical Raspberry Pi Binary Deployment**:
+   - When authorized by user, copy updated ARM64 binary (`testcloud-linux-arm64`) to `node-operator@192.168.1.50:/opt/stiqrcloud/stiqrcloud` and restart `stiqrcloud.service`.
+2. **Interactive Escrow Settlement & Audit Challenge Loop**:
    - Settle mock Lightning invoices via webhook / API call.
    - Trigger automated periodic Merkle audits against storage peers and log reputation score bumps on the dashboard.
-2. **Private Node NAT Traversal**:
-   - WebSocket reverse relay tunneling (`/ws/relay`) for nodes behind strict firewalls / residential NAT.
 3. **TypeScript / JavaScript Client SDK**:
    - Port SDK conventions to `sdk/ts` for web browser frontends and Node.js.
 4. **Remote Staging / Publication**:
-   - When authorized by user, push repository to GitHub / stiqrhub with tagged release `v0.1.0`.
+   - When authorized by user, push repository to GitHub / stiqrhub with tagged release.

@@ -154,6 +154,14 @@ pkill -9 testcloud
   - Throttled reconciliation to a maximum of 10 records per cycle.
   - Removed reconciliation invocation from the 3-second heartbeat handler.
 
+### 5. Edge Node NAT Pull Sync & Content-Addressed Chunk Distribution
+- **Cause**: Edge nodes behind residential NAT/firewalls (such as friend VMs or laptops without port forwarding) advertised empty `PublicAddr = ""` to prevent port conflicts. Push-only replication (`POST /api/internal/store`) skipped them, leaving newly joined friend nodes with 0 records.
+- **Fix**:
+  - `GET /api/sync/records`: Gateway endpoint supporting `peer_id`, `since`, and `limit`, with dynamic quorum backfill for new edge nodes.
+  - `GET /api/chunks/{hash}`: Direct content-addressed chunk retrieval for raw file and picture blobs.
+  - `SyncRecordsFromPeers()` & `StartSyncLoop()`: Autonomous client sync routine in `pkg/p2p/swarm.go` running on boot and every 10s over outbound HTTPS.
+  - Idempotent chunk caching: Nodes verify local chunk hashes (`store.HasChunk`) to skip redundant downloads.
+
 ---
 
 ## 6. Verification Endpoints

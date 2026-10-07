@@ -6,6 +6,7 @@ import (
 
 func TestEscrowPricingAndContractLifecycle(t *testing.T) {
 	mgr := NewManager("node_auditor_1", 100)
+	_ = mgr.SetFreeForAll(false)
 
 	rates := map[string]int64{
 		"storage_1": 150,
@@ -55,6 +56,7 @@ func TestEscrowPricingAndContractLifecycle(t *testing.T) {
 
 func TestEscrowWhitelistAndFreeForAll(t *testing.T) {
 	mgr := NewManager("node_auditor_1", 100)
+	_ = mgr.SetFreeForAll(false)
 
 	// Add VIP address to whitelist
 	vipAddr := "ed25519_vip_address_xyz"

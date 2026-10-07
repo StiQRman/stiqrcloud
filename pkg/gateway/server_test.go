@@ -97,3 +97,119 @@ func TestGatewayAPIEndpointsAndInvariantDataID(t *testing.T) {
 		t.Fatalf("PocketBase endpoint failed: %d", rec.Code)
 	}
 }
+
+func TestEdgeNodeNATPullSync(t *testing.T) {
+	// 1. Setup Gateway Server
+	serverDir, err := os.MkdirTemp("", "testcloud_gw_sync_*")
+	if err != nil {
+		t.Fatalf("failed to create server temp dir: %v", err)
+	}
+	defer os.RemoveAll(serverDir)
+
+	serverStore, _ := storage.NewStore(serverDir)
+	serverEscrow := escrow.NewManager("pi_server", 100)
+	serverSwarm := p2p.NewSwarm("pi_server", "http://192.168.1.50:8100", serverStore)
+	serverAuditor := audit.NewCoordinator("pi_server", serverStore, serverEscrow, serverSwarm)
+
+	srv := NewServer(Config{
+		NodeID:     "pi_server",
+		Store:      serverStore,
+		Swarm:      serverSwarm,
+		EscrowMgr:  serverEscrow,
+		Auditor:    serverAuditor,
+		Standalone: false,
+	})
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// 2. Add record with chunk to Gateway
+	chunkContent := []byte("hello decentralized storage chunk from pi gateway")
+	rec, err := serverStore.CreateRecord(&storage.Record{
+		Collection:     "family_photos",
+		UserPubAddress: "ed25519_owner_key",
+		Text:           "Encrypted metadata text",
+		FileName:       "photo.raw",
+		TotalBytes:     int64(len(chunkContent)),
+	}, chunkContent, nil)
+	if err != nil {
+		t.Fatalf("failed to create record on gateway: %v", err)
+	}
+
+	// Assign edge node to the record's storage peers
+	rec.StoragePeers = []string{"friendnode_levisenvy_4704"}
+	_ = serverStore.SaveRecord(rec)
+
+	// 3. Setup Edge Node (behind NAT: localAddr is empty "")
+	edgeDir, err := os.MkdirTemp("", "testcloud_edge_*")
+	if err != nil {
+		t.Fatalf("failed to create edge temp dir: %v", err)
+	}
+	defer os.RemoveAll(edgeDir)
+
+	edgeStore, _ := storage.NewStore(edgeDir)
+	edgeEscrow := escrow.NewManager("friendnode_levisenvy_4704", 100)
+	edgeSwarm := p2p.NewSwarm("friendnode_levisenvy_4704", "", edgeStore)
+	edgeSwarm.AddBootstrapPeer(ts.URL)
+
+	edgeSyncedContract := false
+	edgeSwarm.SetOnRecordSynced(func(r *storage.Record) {
+		if r.DataID == rec.DataID {
+			edgeSyncedContract = true
+			if edgeEscrow != nil {
+				_, _ = edgeEscrow.CreateContract(r.DataID, r.UserPubAddress, r.TotalBytes, 1, nil, r.AuditorPeers)
+			}
+		}
+	})
+
+	// Before sync: edge node store must be completely empty
+	if _, err := edgeStore.GetRecord(rec.DataID); err == nil {
+		t.Fatalf("expected edge store to not have record before sync")
+	}
+	if edgeStore.HasChunk(rec.FileChunkHash) {
+		t.Fatalf("expected edge store to not have chunk before sync")
+	}
+
+	// 4. Run Edge Pull Sync
+	synced, err := edgeSwarm.SyncRecordsFromPeers()
+	if err != nil {
+		t.Fatalf("SyncRecordsFromPeers failed: %v", err)
+	}
+	if synced != 1 {
+		t.Fatalf("Expected 1 record synced, got %d", synced)
+	}
+
+	// 5. Verify Edge Node now holds record and chunk
+	pulledRec, err := edgeStore.GetRecord(rec.DataID)
+	if err != nil {
+		t.Fatalf("Failed to retrieve synced record from edge store: %v", err)
+	}
+	if pulledRec.DataID != rec.DataID || pulledRec.Text != rec.Text {
+		t.Fatalf("Synced record content mismatch: %+v vs %+v", pulledRec, rec)
+	}
+
+	if !edgeStore.HasChunk(rec.FileChunkHash) {
+		t.Fatalf("Edge store is missing synced chunk file!")
+	}
+
+	downloadedChunk, err := edgeStore.GetChunk(rec.FileChunkHash)
+	if err != nil {
+		t.Fatalf("Failed to read synced chunk: %v", err)
+	}
+	if !bytes.Equal(downloadedChunk, chunkContent) {
+		t.Fatalf("Chunk bytes mismatch! Expected %q, got %q", string(chunkContent), string(downloadedChunk))
+	}
+
+	if !edgeSyncedContract {
+		t.Fatalf("Expected onRecordSynced callback to have fired for edge escrow")
+	}
+
+	// 6. Test Idempotence: Second sync cycle skips already-cached records
+	syncedSecond, err := edgeSwarm.SyncRecordsFromPeers()
+	if err != nil {
+		t.Fatalf("Second SyncRecordsFromPeers failed: %v", err)
+	}
+	if syncedSecond != 0 {
+		t.Fatalf("Expected 0 records on redundant second sync, got %d", syncedSecond)
+	}
+}
