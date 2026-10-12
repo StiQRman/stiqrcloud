@@ -306,12 +306,38 @@
   - **Record Creation & Retrieval**: Created record `rec_975fe9fef8baf938e733e48d_45152` with Free Storage Agreement and invariant Merkle root.
   - **Local Dashboard**: Fully operational and protected at `http://localhost:8100/dashboard`.
 
+- **Phase 12: User Data Placement Control & Storage Routing Policies (Completed & Verified)**:
+  - **Problem Solved**: Previously, all stored records were automatically pushed into a 3-storage-node mesh quorum. App users had no mechanism to prevent private data from leaving their own hardware, or to designate specific trusted peer nodes for backup.
+  - **Storage Policies & Routing**: Added `ReplicationPolicy` (`"local"`, `"replicated_2"`, `"distributed"`, `"custom"`) and `TargetReplicas` to `storage.Record`:
+    - **Local-Only (`local`)**: Record stays strictly on the user's own node. Zero remote storage nodes assigned; zero network broadcast; airgapped from `/api/sync/records` peer pull sync loops.
+    - **Replicated to 2 Nodes (`replicated_2`)**: Dynamically selects 2 healthy storage peers via `SelectQuorumWithCounts(3, 2)` instead of the default 3.
+    - **Custom Target Routing (`custom`)**: User explicitly supplies `storage_peers` array, and the backend replicates exclusively to those target peers without overriding.
+  - **Verification**: Verified via `TestStoragePoliciesAndUserControl` in [`pkg/gateway/server_test.go`](pkg/gateway/server_test.go), confirming privacy airgap and custom route preservation.
+
+- **Phase 13: Official TypeScript & JavaScript Client SDK (`sdk/ts`) (Completed & Verified)**:
+  - **NPM Package**: Created `@stiqrhub/testcloud` in [`sdk/ts`](sdk/ts) with dual ESM/CJS build, complete TypeScript type definitions, and zero external runtime dependencies.
+  - **User-Owned Node Management (`NodeManager`)**:
+    - Users can add their own local or self-hosted node (`addNode('http://localhost:8100')`).
+    - Dynamic primary node switching and automatic failover.
+    - Live health checking and latency measurement.
+  - **Full Data Placement Control**:
+    - `storagePolicy: 'local-only'` keeps data strictly on user's node.
+    - `storagePolicy: 'replicated-2'` backs up to user's node + 2 peer nodes.
+    - `storagePolicy: 'custom'` targets specific user-selected nodes via `storagePeers: [...]`.
+  - **Zero-Knowledge Encryption (`TestCloudCrypto`)**:
+    - AES-256-GCM encryption with 32-byte DEKs using native Web Crypto API.
+    - Standard `tc:enc:v1:<base64-json>` envelope compatibility.
+    - Ed25519 cryptographic keypair generation, signing, and verification.
+  - **PocketBase-Compatible API**:
+    - Drop-in collection API (`client.collection('notes').create(...)`, `.getOne()`, `.getList()`, `.update()`, `.delete()`).
+  - **Verification**: 22 unit and live backend integration tests passing (`sdk/ts/test/`).
+
 ### Planned Next Steps
 1. **Interactive Escrow Settlement & Audit Challenge Loop**:
    - Settle mock Lightning invoices via webhook / API call.
    - Trigger automated periodic Merkle audits against storage peers and log reputation score bumps on the dashboard.
-2. **TypeScript / JavaScript Client SDK**:
-   - Port SDK conventions to `sdk/ts` for web browser frontends and Node.js.
+2. **Publish TypeScript SDK (`npm publish`)**:
+   - Publish `@stiqrhub/testcloud` to npm registry when authorized.
 3. **Remote Staging / Publication**:
    - When authorized by user, push repository to GitHub / stiqrhub with tagged release.
 

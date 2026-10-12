@@ -46,8 +46,10 @@ type Record struct {
 	TotalBytes       int64                `json:"total_bytes"`
 	ACL              []AccessControlEntry `json:"acl,omitempty"`                // Authorized collaborators
 	MerkleRoot       string               `json:"merkle_root,omitempty"`        // Cryptographic audit root
-	StoragePeers     []string             `json:"storage_peers,omitempty"`      // 3 assigned storage peers
-	AuditorPeers     []string             `json:"auditor_peers,omitempty"`      // 3 assigned auditor peers
+	ReplicationPolicy string              `json:"replication_policy,omitempty"` // "local", "replicated_2", "distributed", "custom"
+	TargetReplicas   int                  `json:"target_replicas,omitempty"`    // Desired replica count (e.g. 2)
+	StoragePeers     []string             `json:"storage_peers,omitempty"`      // Assigned storage peers
+	AuditorPeers     []string             `json:"auditor_peers,omitempty"`      // Assigned auditor peers
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
 }

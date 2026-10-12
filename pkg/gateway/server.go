@@ -535,6 +535,10 @@ func (s *Server) handleSyncRecords(w http.ResponseWriter, r *http.Request) {
 		if rec == nil {
 			continue
 		}
+		// Local-only records never leave this node
+		if rec.ReplicationPolicy == "local" || rec.ReplicationPolicy == "local-only" {
+			continue
+		}
 		if !since.IsZero() && !rec.UpdatedAt.After(since) {
 			continue
 		}
@@ -569,6 +573,16 @@ func (s *Server) handleSyncRecords(w http.ResponseWriter, r *http.Request) {
 	// look for records that have < 3 storage peers or auto/stale peers, and assign peerID!
 	if peerID != "" && !all && len(assigned) < 20 {
 		for _, rec := range allRecords {
+			if rec == nil {
+				continue
+			}
+			// Never backfill local-only or custom-routed records
+			if rec.ReplicationPolicy == "local" || rec.ReplicationPolicy == "local-only" || rec.ReplicationPolicy == "custom" {
+				continue
+			}
+			if (rec.ReplicationPolicy == "replicated_2" || rec.ReplicationPolicy == "distributed_2" || rec.TargetReplicas == 2) && len(rec.StoragePeers) >= 2 {
+				continue
+			}
 			if len(assigned) >= limit {
 				break
 			}
@@ -616,6 +630,12 @@ func (s *Server) handleSyncRecords(w http.ResponseWriter, r *http.Request) {
 	// so newly connected edge node immediately receives mesh data to replicate!
 	if len(assigned) == 0 && len(allRecords) > 0 {
 		for _, rec := range allRecords {
+			if rec == nil {
+				continue
+			}
+			if rec.ReplicationPolicy == "local" || rec.ReplicationPolicy == "local-only" {
+				continue
+			}
 			if !since.IsZero() && !rec.UpdatedAt.After(since) {
 				continue
 			}
@@ -673,28 +693,68 @@ func (s *Server) replicateAndEngageQuorum(rec *storage.Record, fileBytes, picByt
 		return nil
 	}
 
-	// Verify existing storage peers
-	peersOnline := 0
-	hasAutoNode := false
-	if len(rec.StoragePeers) > 0 {
-		for _, sp := range rec.StoragePeers {
-			if strings.Contains(sp, "auto") {
-				hasAutoNode = true
-				break
-			}
-			if p, ok := s.swarm.GetPeer(sp); ok && p.IsOnline && p.PublicAddr != "" {
-				peersOnline++
-			}
-		}
+	// 1. Local-only policy: Data stays strictly on this node with zero network broadcast
+	if rec.ReplicationPolicy == "local" || rec.ReplicationPolicy == "local-only" {
+		rec.StoragePeers = nil
+		_ = s.store.SaveRecord(rec)
+		return nil
 	}
 
-	// If fewer than 2 active storage peers, or has synthetic auto nodes, or < 3 peers, reselect quorum!
-	if hasAutoNode || peersOnline < 2 || len(rec.StoragePeers) < 3 {
-		auditors, storageNodes, qErr := s.swarm.SelectQuorum()
-		if qErr == nil {
-			rec.AuditorPeers = auditors
-			rec.StoragePeers = storageNodes
-			_ = s.store.SaveRecord(rec)
+	// 2. Custom storage peers explicitly chosen by user
+	if len(rec.StoragePeers) > 0 && (rec.ReplicationPolicy == "custom" || rec.ReplicationPolicy == "") {
+		if len(rec.AuditorPeers) < 3 {
+			auditors, _, qErr := s.swarm.SelectQuorum()
+			if qErr == nil {
+				rec.AuditorPeers = auditors
+				_ = s.store.SaveRecord(rec)
+			}
+		}
+	} else if rec.ReplicationPolicy == "replicated_2" || rec.ReplicationPolicy == "distributed_2" || rec.TargetReplicas == 2 {
+		// 3. User requested replication to 2 storage peers
+		peersOnline := 0
+		hasAutoNode := false
+		if len(rec.StoragePeers) > 0 {
+			for _, sp := range rec.StoragePeers {
+				if strings.Contains(sp, "auto") {
+					hasAutoNode = true
+					break
+				}
+				if p, ok := s.swarm.GetPeer(sp); ok && p.IsOnline && p.PublicAddr != "" {
+					peersOnline++
+				}
+			}
+		}
+		if hasAutoNode || peersOnline < 1 || len(rec.StoragePeers) < 2 {
+			auditors, storageNodes, qErr := s.swarm.SelectQuorumWithCounts(3, 2)
+			if qErr == nil {
+				rec.AuditorPeers = auditors
+				rec.StoragePeers = storageNodes
+				_ = s.store.SaveRecord(rec)
+			}
+		}
+	} else {
+		// 4. Default 3-node mesh quorum
+		peersOnline := 0
+		hasAutoNode := false
+		if len(rec.StoragePeers) > 0 {
+			for _, sp := range rec.StoragePeers {
+				if strings.Contains(sp, "auto") {
+					hasAutoNode = true
+					break
+				}
+				if p, ok := s.swarm.GetPeer(sp); ok && p.IsOnline && p.PublicAddr != "" {
+					peersOnline++
+				}
+			}
+		}
+
+		if hasAutoNode || peersOnline < 2 || len(rec.StoragePeers) < 3 {
+			auditors, storageNodes, qErr := s.swarm.SelectQuorum()
+			if qErr == nil {
+				rec.AuditorPeers = auditors
+				rec.StoragePeers = storageNodes
+				_ = s.store.SaveRecord(rec)
+			}
 		}
 	}
 
@@ -798,7 +858,9 @@ func (s *Server) handleRecordsRoot(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 	// Parse multipart or JSON
-	var text, userPubKey, sig, collection, dataID string
+	var text, userPubKey, sig, collection, dataID, repPolicy string
+	var customStoragePeers []string
+	var targetReplicas int
 	var fileBytes, picBytes []byte
 	var fileName, picName string
 
@@ -810,6 +872,21 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 		sig = r.FormValue("signature")
 		collection = r.FormValue("collection")
 		dataID = r.FormValue("data_id")
+		repPolicy = r.FormValue("replication_policy")
+		if spVal := r.FormValue("storage_peers"); spVal != "" {
+			if strings.HasPrefix(spVal, "[") {
+				_ = json.Unmarshal([]byte(spVal), &customStoragePeers)
+			} else {
+				for _, part := range strings.Split(spVal, ",") {
+					if trimmed := strings.TrimSpace(part); trimmed != "" {
+						customStoragePeers = append(customStoragePeers, trimmed)
+					}
+				}
+			}
+		}
+		if trVal := r.FormValue("target_replicas"); trVal != "" {
+			targetReplicas, _ = strconv.Atoi(trVal)
+		}
 
 		if file, header, err := r.FormFile("file"); err == nil {
 			fileBytes, _ = io.ReadAll(file)
@@ -823,11 +900,14 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		var body struct {
-			DataID         string `json:"data_id"`
-			Collection     string `json:"collection"`
-			UserPubAddress string `json:"user_pub_address"`
-			Signature      string `json:"signature"`
-			Text           string `json:"text"`
+			DataID            string   `json:"data_id"`
+			Collection        string   `json:"collection"`
+			UserPubAddress    string   `json:"user_pub_address"`
+			Signature         string   `json:"signature"`
+			Text              string   `json:"text"`
+			ReplicationPolicy string   `json:"replication_policy"`
+			StoragePeers      []string `json:"storage_peers"`
+			TargetReplicas    int      `json:"target_replicas"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
 			text = body.Text
@@ -835,6 +915,9 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 			sig = body.Signature
 			collection = body.Collection
 			dataID = body.DataID
+			repPolicy = body.ReplicationPolicy
+			customStoragePeers = body.StoragePeers
+			targetReplicas = body.TargetReplicas
 		}
 	}
 
@@ -843,13 +926,16 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rec := &storage.Record{
-		DataID:         dataID,
-		Collection:     collection,
-		UserPubAddress: userPubKey,
-		OwnerSignature: sig,
-		Text:           text,
-		FileName:       fileName,
-		PictureName:    picName,
+		DataID:            dataID,
+		Collection:        collection,
+		UserPubAddress:    userPubKey,
+		OwnerSignature:    sig,
+		Text:              text,
+		FileName:          fileName,
+		PictureName:       picName,
+		ReplicationPolicy: repPolicy,
+		StoragePeers:      customStoragePeers,
+		TargetReplicas:    targetReplicas,
 	}
 
 	created, err := s.store.CreateRecord(rec, fileBytes, picBytes)
@@ -858,39 +944,25 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// In network mode: engage 3-auditor quorum and 3-storage nodes
-	var auditors, storageNodes []string
+	// Engage quorum and storage nodes according to user replication policy
+	_ = s.replicateAndEngageQuorum(created, fileBytes, picBytes)
+
 	var invoice string
-	if !s.standalone && s.swarm != nil {
-		var qErr error
-		auditors, storageNodes, qErr = s.swarm.SelectQuorum()
-		if qErr == nil {
-			created.AuditorPeers = auditors
-			created.StoragePeers = storageNodes
-
-			// Formulate contract in escrow
-			rates := make(map[string]int64)
-			for _, st := range storageNodes {
-				rates[st] = 100 // default 100 sats
-			}
-			contract, err := s.escrowMgr.CreateContract(created.DataID, created.UserPubAddress, created.TotalBytes, 1, rates, auditors)
-			if err == nil {
-				invoice = contract.LightningInvoice
-			}
-
-			// Broadcast chunks to storage nodes
-			_ = s.swarm.BroadcastRecord(created, storageNodes, fileBytes)
+	if s.escrowMgr != nil {
+		if c, err := s.escrowMgr.GetContract(created.DataID); err == nil && c != nil {
+			invoice = c.LightningInvoice
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"record":            created,
-		"data_id":           created.DataID, // Invariant persistent ID
-		"auditor_peers":     created.AuditorPeers,
-		"storage_peers":     created.StoragePeers,
-		"lightning_invoice": invoice,
+		"record":             created,
+		"data_id":            created.DataID, // Invariant persistent ID
+		"replication_policy": created.ReplicationPolicy,
+		"auditor_peers":      created.AuditorPeers,
+		"storage_peers":      created.StoragePeers,
+		"lightning_invoice":  invoice,
 	})
 }
 
@@ -1062,6 +1134,12 @@ func formatPBRecord(rec *storage.Record) map[string]interface{} {
 	if len(rec.AuditorPeers) > 0 {
 		res["auditor_peers"] = rec.AuditorPeers
 	}
+	if rec.ReplicationPolicy != "" {
+		res["replication_policy"] = rec.ReplicationPolicy
+	}
+	if rec.TargetReplicas > 0 {
+		res["target_replicas"] = rec.TargetReplicas
+	}
 	return res
 }
 
@@ -1151,14 +1229,36 @@ func (s *Server) handleCreatePBRecord(w http.ResponseWriter, r *http.Request, co
 	}
 
 	if record == nil {
+		var repPolicy string
+		if rp, ok := rawBodyMap["replication_policy"].(string); ok {
+			repPolicy = rp
+		}
+		var targetReplicas int
+		if tr, ok := rawBodyMap["target_replicas"].(float64); ok {
+			targetReplicas = int(tr)
+		} else if tr, ok := rawBodyMap["target_replicas"].(int); ok {
+			targetReplicas = tr
+		}
+		var customStoragePeers []string
+		if sp, ok := rawBodyMap["storage_peers"].([]interface{}); ok {
+			for _, item := range sp {
+				if sStr, ok := item.(string); ok && sStr != "" {
+					customStoragePeers = append(customStoragePeers, sStr)
+				}
+			}
+		}
+
 		rec := &storage.Record{
-			DataID:         dataID,
-			Collection:     collection,
-			UserPubAddress: userPubKey,
-			OwnerSignature: sig,
-			Text:           text,
-			FileName:       fileName,
-			PictureName:    picName,
+			DataID:            dataID,
+			Collection:        collection,
+			UserPubAddress:    userPubKey,
+			OwnerSignature:    sig,
+			Text:              text,
+			FileName:          fileName,
+			PictureName:       picName,
+			ReplicationPolicy: repPolicy,
+			TargetReplicas:    targetReplicas,
+			StoragePeers:      customStoragePeers,
 		}
 
 		var err error

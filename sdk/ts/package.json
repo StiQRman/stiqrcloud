@@ -1,0 +1,36 @@
+{
+  "name": "@stiqrhub/testcloud",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Official TypeScript & JavaScript SDK for TestCloud decentralized storage mesh",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test --experimental-strip-types test/*.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "testcloud",
+    "decentralized",
+    "storage",
+    "reticulum",
+    "mesh",
+    "p2p",
+    "pocketbase"
+  ],
+  "author": "StiQRhub Developer <dev@stiqrhub.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

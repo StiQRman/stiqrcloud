@@ -417,6 +417,18 @@ func (s *Swarm) RecordAuditPerformed(auditorID string) {
 // SelectQuorum selects 2 co-auditors and 3 storage nodes using:
 // 75% weighted based on social score, 25% uniform random (giving new nodes a chance).
 func (s *Swarm) SelectQuorum() (auditors []string, storageNodes []string, err error) {
+	return s.SelectQuorumWithCounts(3, 3)
+}
+
+// SelectQuorumWithCounts selects co-auditors and storage nodes based on custom counts.
+func (s *Swarm) SelectQuorumWithCounts(nAuditors, nStorage int) (auditors []string, storageNodes []string, err error) {
+	if nAuditors <= 0 {
+		nAuditors = 3
+	}
+	if nStorage <= 0 {
+		nStorage = 3
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -427,33 +439,33 @@ func (s *Swarm) SelectQuorum() (auditors []string, storageNodes []string, err er
 		}
 	}
 
-	if len(eligible) < 5 {
-		// In small local clusters or test environments, allow reuse or mock peers
-		return s.fallbackQuorum(eligible)
+	totalNeeded := (nAuditors - 1) + nStorage
+	if len(eligible) < totalNeeded {
+		return s.fallbackQuorumCounts(eligible, nAuditors, nStorage)
 	}
 
 	// 1st Auditor is this node
 	auditors = append(auditors, s.localID)
 
-	// Pick 2 Co-Auditors
+	// Pick Co-Auditors
 	remaining := make([]*Peer, len(eligible))
 	copy(remaining, eligible)
 
-	for len(auditors) < 3 && len(remaining) > 0 {
+	for len(auditors) < nAuditors && len(remaining) > 0 {
 		pickedIdx := s.weightedPickIndex(remaining)
 		auditors = append(auditors, remaining[pickedIdx].NodeID)
 		remaining = append(remaining[:pickedIdx], remaining[pickedIdx+1:]...)
 	}
 
-	// Pick 3 Storage Nodes
-	for len(storageNodes) < 3 && len(remaining) > 0 {
+	// Pick Storage Nodes
+	for len(storageNodes) < nStorage && len(remaining) > 0 {
 		pickedIdx := s.weightedPickIndex(remaining)
 		storageNodes = append(storageNodes, remaining[pickedIdx].NodeID)
 		remaining = append(remaining[:pickedIdx], remaining[pickedIdx+1:]...)
 	}
 
-	if len(auditors) < 3 || len(storageNodes) < 3 {
-		return nil, nil, errors.New("insufficient active peers to form 3-auditor / 3-storage quorum")
+	if len(auditors) < nAuditors || len(storageNodes) < nStorage {
+		return nil, nil, errors.New("insufficient active peers to form requested quorum")
 	}
 
 	return auditors, storageNodes, nil
@@ -496,23 +508,23 @@ func (s *Swarm) weightedPickIndex(pool []*Peer) int {
 	return len(pool) - 1
 }
 
-func (s *Swarm) fallbackQuorum(eligible []*Peer) ([]string, []string, error) {
+func (s *Swarm) fallbackQuorumCounts(eligible []*Peer, nAuditors, nStorage int) ([]string, []string, error) {
 	auditors := []string{s.localID}
 	storageNodes := []string{}
 
 	// Prioritize real peers for storage nodes first so data is genuinely replicated!
 	for _, p := range eligible {
-		if len(storageNodes) < 3 {
+		if len(storageNodes) < nStorage {
 			storageNodes = append(storageNodes, p.NodeID)
 		}
-		if len(auditors) < 3 && p.NodeID != s.localID {
+		if len(auditors) < nAuditors && p.NodeID != s.localID {
 			auditors = append(auditors, p.NodeID)
 		}
 	}
 
 	// Synthesize test nodes ONLY if no real peers exist (e.g. standalone test mode)
 	padIdx := 1
-	for len(storageNodes) < 3 {
+	for len(storageNodes) < nStorage {
 		if len(eligible) > 0 {
 			// Reuse real peers instead of inventing fake nodes
 			storageNodes = append(storageNodes, eligible[(padIdx-1)%len(eligible)].NodeID)
@@ -521,7 +533,7 @@ func (s *Swarm) fallbackQuorum(eligible []*Peer) ([]string, []string, error) {
 		}
 		padIdx++
 	}
-	for len(auditors) < 3 {
+	for len(auditors) < nAuditors {
 		if len(eligible) > 0 {
 			auditors = append(auditors, eligible[(padIdx-1)%len(eligible)].NodeID)
 		} else {
@@ -531,6 +543,10 @@ func (s *Swarm) fallbackQuorum(eligible []*Peer) ([]string, []string, error) {
 	}
 
 	return auditors, storageNodes, nil
+}
+
+func (s *Swarm) fallbackQuorum(eligible []*Peer) ([]string, []string, error) {
+	return s.fallbackQuorumCounts(eligible, 3, 3)
 }
 
 // ResolveDataID implements Universal Content Routing:

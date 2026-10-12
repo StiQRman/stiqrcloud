@@ -368,3 +368,107 @@ func TestReticulumAPIEndpointsAndRecordReception(t *testing.T) {
 		t.Fatalf("Record not found or text mismatch: got %v", retrieved)
 	}
 }
+
+func TestStoragePoliciesAndUserControl(t *testing.T) {
+	tempDir, _ := os.MkdirTemp("", "testcloud_policy_*")
+	defer os.RemoveAll(tempDir)
+
+	store, _ := storage.NewStore(tempDir)
+	escrowMgr := escrow.NewManager("node_local", 100)
+	swarm := p2p.NewSwarm("node_local", "http://127.0.0.1:8100", store)
+	auditor := audit.NewCoordinator("node_local", store, escrowMgr, swarm)
+
+	srv := NewServer(Config{
+		NodeID:     "node_local",
+		Store:      store,
+		Swarm:      swarm,
+		EscrowMgr:  escrowMgr,
+		Auditor:    auditor,
+		Standalone: false,
+	})
+	handler := srv.Handler()
+
+	// 1. Test "local" policy: record must stay exclusively on this node
+	localPayload := `{"collection":"personal","text":"Keep this on my local node only","replication_policy":"local"}`
+	req := httptest.NewRequest("POST", "/api/records", bytes.NewBufferString(localPayload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Failed to create local record: status %d", rec.Code)
+	}
+	var localResp map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &localResp)
+	localDataID := localResp["data_id"].(string)
+	if sp, ok := localResp["storage_peers"].([]interface{}); ok && len(sp) > 0 {
+		t.Fatalf("Expected 0 remote storage peers for local policy, got %v", sp)
+	}
+
+	// Verify that local record is NEVER returned via peer pull sync
+	syncReq := httptest.NewRequest("GET", "/api/sync/records?peer_id=remote_node_bob", nil)
+	syncRec := httptest.NewRecorder()
+	handler.ServeHTTP(syncRec, syncReq)
+	if syncRec.Code != http.StatusOK {
+		t.Fatalf("Sync request failed: status %d", syncRec.Code)
+	}
+	var syncResp struct {
+		Records []*storage.Record `json:"records"`
+	}
+	_ = json.Unmarshal(syncRec.Body.Bytes(), &syncResp)
+	for _, r := range syncResp.Records {
+		if r.DataID == localDataID {
+			t.Fatalf("CRITICAL PRIVACY LEAK: Local-only record %s was returned in peer sync!", localDataID)
+		}
+	}
+
+	// 2. Test "replicated_2" policy: data should be assigned to exactly 2 storage nodes
+	rep2Payload := `{"collection":"docs","text":"Backup to 2 storage peers","replication_policy":"replicated_2"}`
+	req = httptest.NewRequest("POST", "/api/records", bytes.NewBufferString(rep2Payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Failed to create replicated_2 record: status %d", rec.Code)
+	}
+	var rep2Resp map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &rep2Resp)
+	sp2, ok := rep2Resp["storage_peers"].([]interface{})
+	if !ok || len(sp2) != 2 {
+		t.Fatalf("Expected exactly 2 storage peers for replicated_2, got %v", sp2)
+	}
+
+	// 3. Test "custom" policy: user explicitly dictates where data goes
+	customPayload := `{"collection":"docs","text":"Strict target routing","replication_policy":"custom","storage_peers":["user_home_nas","friend_pc_node"]}`
+	req = httptest.NewRequest("POST", "/api/records", bytes.NewBufferString(customPayload))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("Failed to create custom routed record: status %d", rec.Code)
+	}
+	var customResp map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &customResp)
+	spCustom, ok := customResp["storage_peers"].([]interface{})
+	if !ok || len(spCustom) != 2 || spCustom[0] != "user_home_nas" || spCustom[1] != "friend_pc_node" {
+		t.Fatalf("Expected custom peers ['user_home_nas', 'friend_pc_node'], got %v", spCustom)
+	}
+
+	// 4. Test PocketBase endpoint with local replication policy
+	pbPayload := `{"text":"PocketBase local note","replication_policy":"local"}`
+	req = httptest.NewRequest("POST", "/api/collections/notes/records", bytes.NewBufferString(pbPayload))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Failed to create PB record with local policy: status %d", rec.Code)
+	}
+	var pbResp map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &pbResp)
+	if pbResp["replication_policy"] != "local" {
+		t.Fatalf("Expected PB replication_policy 'local', got %v", pbResp["replication_policy"])
+	}
+	if sp, ok := pbResp["storage_peers"].([]interface{}); ok && len(sp) > 0 {
+		t.Fatalf("Expected 0 storage peers for PB local policy, got %v", sp)
+	}
+}
+
