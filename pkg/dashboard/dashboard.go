@@ -64,18 +64,18 @@ func NewServer(
 
 // RegisterRoutes hooks the dashboard endpoints into an HTTP mux.
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/dashboard", s.handleDashboardHTML)
-	mux.HandleFunc("/api/dashboard/stats", s.handleStatsJSON)
-	mux.HandleFunc("/api/dashboard/version", s.handleVersionJSON)
-	mux.HandleFunc("/api/dashboard/records", s.handleRecordsJSON)
+	mux.HandleFunc("/dashboard", s.HandleDashboardHTML)
+	mux.HandleFunc("/api/dashboard/stats", s.HandleStatsJSON)
+	mux.HandleFunc("/api/dashboard/version", s.HandleVersionJSON)
+	mux.HandleFunc("/api/dashboard/records", s.HandleRecordsJSON)
 }
 
-func (s *Server) handleDashboardHTML(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandleDashboardHTML(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(DashboardHTML))
 }
 
-func (s *Server) handleStatsJSON(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandleStatsJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	storageStats := s.store.StorageStats()
@@ -105,6 +105,11 @@ func (s *Server) handleStatsJSON(w http.ResponseWriter, r *http.Request) {
 		totalSatsAccrued += c.PaidSats
 	}
 
+	gw := ""
+	if s.rnsManager != nil {
+		gw = s.rnsManager.GetActiveGateway()
+	}
+
 	res := map[string]interface{}{
 		"app_name":           version.AppName,
 		"version":            version.CurrentVersion,
@@ -115,6 +120,7 @@ func (s *Server) handleStatsJSON(w http.ResponseWriter, r *http.Request) {
 		"mode":               mode,
 		"is_public":          s.isPublic,
 		"reticulum_dest":     s.rnsDest,
+		"reticulum_gateway":  gw,
 		"reticulum_peers":    rnsPeers,
 		"storage":            storageStats,
 		"peers_count":        len(peers),
@@ -132,13 +138,13 @@ func (s *Server) handleStatsJSON(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-func (s *Server) handleVersionJSON(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandleVersionJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	status := version.CheckUpdate()
 	_ = json.NewEncoder(w).Encode(status)
 }
 
-func (s *Server) handleRecordsJSON(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandleRecordsJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	records, total := s.store.ListRecords("", 50, 0)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{

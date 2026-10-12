@@ -33,21 +33,21 @@ type AccessControlEntry struct {
 
 // Record is the core persistent database entity.
 type Record struct {
-	DataID           string               `json:"data_id"`            // INVARIANT: Never changes across edits or node migration
-	Collection       string               `json:"collection"`         // Collection/table name
-	UserPubAddress   string               `json:"user_pub_address"`   // Owner public key
-	OwnerSignature   string               `json:"owner_signature"`   // Signature over payload
-	Version          int64                `json:"version"`            // Monotonic revision counter
-	Text             string               `json:"text"`               // Encrypted or plaintext payload
-	FileChunkHash    string               `json:"file_chunk_hash"`    // Content hash of file
-	FileName         string               `json:"file_name"`
-	PictureChunkHash string               `json:"picture_chunk_hash"` // Content hash of picture
-	PictureName      string               `json:"picture_name"`
+	DataID           string               `json:"data_id"`                      // INVARIANT: Never changes across edits or node migration
+	Collection       string               `json:"collection"`                   // Collection/table name
+	UserPubAddress   string               `json:"user_pub_address,omitempty"`   // Owner public key
+	OwnerSignature   string               `json:"owner_signature,omitempty"`   // Signature over payload
+	Version          int64                `json:"version"`                      // Monotonic revision counter
+	Text             string               `json:"text"`                         // Encrypted or plaintext payload
+	FileChunkHash    string               `json:"file_chunk_hash,omitempty"`    // Content hash of file
+	FileName         string               `json:"file_name,omitempty"`
+	PictureChunkHash string               `json:"picture_chunk_hash,omitempty"` // Content hash of picture
+	PictureName      string               `json:"picture_name,omitempty"`
 	TotalBytes       int64                `json:"total_bytes"`
-	ACL              []AccessControlEntry `json:"acl"`                // Authorized collaborators
-	MerkleRoot       string               `json:"merkle_root"`        // Cryptographic audit root
-	StoragePeers     []string             `json:"storage_peers"`      // 3 assigned storage peers
-	AuditorPeers     []string             `json:"auditor_peers"`      // 3 assigned auditor peers
+	ACL              []AccessControlEntry `json:"acl,omitempty"`                // Authorized collaborators
+	MerkleRoot       string               `json:"merkle_root,omitempty"`        // Cryptographic audit root
+	StoragePeers     []string             `json:"storage_peers,omitempty"`      // 3 assigned storage peers
+	AuditorPeers     []string             `json:"auditor_peers,omitempty"`      // 3 assigned auditor peers
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
 }

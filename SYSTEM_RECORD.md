@@ -161,21 +161,32 @@ pkill -9 testcloud
   - `GET /api/chunks/{hash}`: Direct content-addressed chunk retrieval for raw file and picture blobs.
   - `SyncRecordsFromPeers()` & `StartSyncLoop()`: Autonomous client sync routine in `pkg/p2p/swarm.go` running on boot and every 10s over outbound HTTPS.
   - Idempotent chunk caching: Nodes verify local chunk hashes (`store.HasChunk`) to skip redundant downloads.
+### 6. Local-Only Operator Dashboard & Administrative API Protection
+- **Cause**: Previously, the web dashboard (`/dashboard`), telemetry (`/api/dashboard/*`), and policy controls (`/api/escrow/*`, `/api/storage/quota`) were served over the same HTTP handler as public gateway routes. When tunneled via Cloudflare (`stiqrcloud.stiqrnotes.com`), the operator dashboard was exposed to anyone on the public internet, posing an authorization and configuration tampering hazard.
+- **Fix**:
+  - Implemented `isLocalRequest(r *http.Request)` and `localOnly` access control in [`pkg/gateway/server.go`](pkg/gateway/server.go).
+  - Explicitly rejects any request with Cloudflare headers (`CF-Ray`, `CF-Connecting-IP`, `CF-Visitor`), public `Host` headers (`stiqrcloud.stiqrnotes.com`), or non-private IP addresses with `403 Forbidden`.
+  - Root path (`/`) now returns public gateway metadata JSON over public WAN and only redirects to `/dashboard` for local LAN requests.
+  - Operator dashboard remains 100% accessible locally via `http://192.168.1.50:8100/dashboard` or `http://localhost:8100/dashboard`.
+  - Unit tests verified in `TestDashboardLocalOnlyProtection` and deployed live to Raspberry Pi `192.168.1.50`.
 
 ---
 
 ## 6. Verification Endpoints
 
 ```bash
-# Node health check
+# Public Gateway health check (Open to WAN)
 curl -sSL https://stiqrcloud.stiqrnotes.com/api/health
 
-# Connected peer list
+# Connected peer list (Open to WAN)
 curl -sSL https://stiqrcloud.stiqrnotes.com/api/peers
 
-# Complete mesh stats & contracts
-curl -sSL https://stiqrcloud.stiqrnotes.com/api/dashboard/stats
+# Public Gateway root (Returns JSON metadata, NO redirect)
+curl -sSL https://stiqrcloud.stiqrnotes.com/
 
-# Web dashboard
-https://stiqrcloud.stiqrnotes.com/dashboard
+# Public dashboard access check (Returns 403 Forbidden as expected)
+curl -I https://stiqrcloud.stiqrnotes.com/dashboard
+
+# Private Operator Dashboard (Local LAN ONLY)
+http://192.168.1.50:8100/dashboard
 ```

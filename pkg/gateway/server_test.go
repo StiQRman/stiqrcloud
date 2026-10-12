@@ -11,6 +11,7 @@ import (
 	"github.com/stiqrhub/testcloud/pkg/audit"
 	"github.com/stiqrhub/testcloud/pkg/escrow"
 	"github.com/stiqrhub/testcloud/pkg/p2p"
+	"github.com/stiqrhub/testcloud/pkg/reticulum"
 	"github.com/stiqrhub/testcloud/pkg/storage"
 	"github.com/stiqrhub/testcloud/pkg/version"
 )
@@ -211,5 +212,159 @@ func TestEdgeNodeNATPullSync(t *testing.T) {
 	}
 	if syncedSecond != 0 {
 		t.Fatalf("Expected 0 records on redundant second sync, got %d", syncedSecond)
+	}
+}
+
+func TestDashboardLocalOnlyProtection(t *testing.T) {
+	tempDir, _ := os.MkdirTemp("", "testcloud_gw_dash_test_*")
+	defer os.RemoveAll(tempDir)
+
+	store, _ := storage.NewStore(tempDir)
+	escrowMgr := escrow.NewManager("pi_server", 100)
+	swarm := p2p.NewSwarm("pi_server", "http://192.168.1.50:8100", store)
+	auditor := audit.NewCoordinator("pi_server", store, escrowMgr, swarm)
+
+	srv := NewServer(Config{
+		NodeID:     "pi_server",
+		GatewayURL: "https://stiqrcloud.stiqrnotes.com",
+		PublicAddr: "https://stiqrcloud.stiqrnotes.com",
+		Store:      store,
+		Swarm:      swarm,
+		EscrowMgr:  escrowMgr,
+		Auditor:    auditor,
+		Standalone: false,
+	})
+	handler := srv.Handler()
+
+	// 1. Local Request (from LAN 192.168.1.100) -> Should succeed (200 OK)
+	reqLocal := httptest.NewRequest("GET", "http://192.168.1.50:8100/dashboard", nil)
+	reqLocal.RemoteAddr = "192.168.1.100:54321"
+	recLocal := httptest.NewRecorder()
+	handler.ServeHTTP(recLocal, reqLocal)
+	if recLocal.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for local LAN request to /dashboard, got %d", recLocal.Code)
+	}
+
+	// Local root request should redirect to /dashboard (302 Found)
+	reqLocalRoot := httptest.NewRequest("GET", "http://192.168.1.50:8100/", nil)
+	reqLocalRoot.RemoteAddr = "192.168.1.100:54321"
+	recLocalRoot := httptest.NewRecorder()
+	handler.ServeHTTP(recLocalRoot, reqLocalRoot)
+	if recLocalRoot.Code != http.StatusFound {
+		t.Fatalf("Expected 302 Found for local LAN request to /, got %d", recLocalRoot.Code)
+	}
+
+	// 2. Public Request via Cloudflare Tunnel (CF-Ray present) -> MUST BE 403 Forbidden!
+	reqCF := httptest.NewRequest("GET", "/dashboard", nil)
+	reqCF.RemoteAddr = "127.0.0.1:40000"
+	reqCF.Header.Set("CF-Ray", "a4861070dcc7c64b-SLC")
+	reqCF.Header.Set("CF-Connecting-IP", "198.51.100.42")
+	recCF := httptest.NewRecorder()
+	handler.ServeHTTP(recCF, reqCF)
+	if recCF.Code != http.StatusForbidden {
+		t.Fatalf("SECURITY VIOLATION: Expected 403 Forbidden for Cloudflare request to /dashboard, got %d", recCF.Code)
+	}
+
+	// Public root request must NOT redirect to /dashboard
+	reqCFRoot := httptest.NewRequest("GET", "/", nil)
+	reqCFRoot.RemoteAddr = "127.0.0.1:40000"
+	reqCFRoot.Header.Set("CF-Ray", "a4861070dcc7c64b-SLC")
+	recCFRoot := httptest.NewRecorder()
+	handler.ServeHTTP(recCFRoot, reqCFRoot)
+	if recCFRoot.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK public gateway info for /, got %d", recCFRoot.Code)
+	}
+
+	// Public request to admin escrow policy endpoint -> MUST BE 403 Forbidden!
+	reqAdminCF := httptest.NewRequest("GET", "/api/escrow/policy", nil)
+	reqAdminCF.RemoteAddr = "127.0.0.1:40000"
+	reqAdminCF.Header.Set("CF-Ray", "a4861070dcc7c64b-SLC")
+	recAdminCF := httptest.NewRecorder()
+	handler.ServeHTTP(recAdminCF, reqAdminCF)
+	if recAdminCF.Code != http.StatusForbidden {
+		t.Fatalf("SECURITY VIOLATION: Expected 403 Forbidden for Cloudflare request to /api/escrow/policy, got %d", recAdminCF.Code)
+	}
+
+	// Public request to /api/health -> MUST REMAIN 200 OK!
+	reqHealthCF := httptest.NewRequest("GET", "/api/health", nil)
+	reqHealthCF.Header.Set("CF-Ray", "a4861070dcc7c64b-SLC")
+	recHealthCF := httptest.NewRecorder()
+	handler.ServeHTTP(recHealthCF, reqHealthCF)
+	if recHealthCF.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for /api/health over Cloudflare, got %d", recHealthCF.Code)
+	}
+
+	// 3. Public Hostname in Host header (stiqrcloud.stiqrnotes.com) -> MUST BE 403 Forbidden!
+	reqHostPub := httptest.NewRequest("GET", "/dashboard", nil)
+	reqHostPub.Host = "stiqrcloud.stiqrnotes.com"
+	reqHostPub.RemoteAddr = "192.168.1.100:54321"
+	recHostPub := httptest.NewRecorder()
+	handler.ServeHTTP(recHostPub, reqHostPub)
+	if recHostPub.Code != http.StatusForbidden {
+		t.Fatalf("SECURITY VIOLATION: Expected 403 Forbidden for Host: stiqrcloud.stiqrnotes.com, got %d", recHostPub.Code)
+	}
+}
+
+func TestReticulumAPIEndpointsAndRecordReception(t *testing.T) {
+	tempDir, _ := os.MkdirTemp("", "testcloud_rns_gw_*")
+	defer os.RemoveAll(tempDir)
+
+	store, _ := storage.NewStore(tempDir)
+	id, _ := reticulum.NewIdentity("testcloud.node")
+	rnsMgr := reticulum.NewInterfaceManager(id)
+	defer rnsMgr.Stop()
+
+	srv := NewServer(Config{
+		NodeID:     "node_rns_test",
+		Store:      store,
+		RNSManager: rnsMgr,
+		RNSDest:    id.Destination().String(),
+	})
+	handler := srv.Handler()
+
+	// 1. Status endpoint
+	reqStatus := httptest.NewRequest("GET", "/api/reticulum/status", nil)
+	recStatus := httptest.NewRecorder()
+	handler.ServeHTTP(recStatus, reqStatus)
+	if recStatus.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for /api/reticulum/status, got %d", recStatus.Code)
+	}
+
+	// 2. Announce endpoint
+	reqAnn := httptest.NewRequest("POST", "/api/reticulum/announce", nil)
+	recAnn := httptest.NewRecorder()
+	handler.ServeHTTP(recAnn, reqAnn)
+	if recAnn.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for /api/reticulum/announce, got %d", recAnn.Code)
+	}
+
+	// 3. Directly simulate an incoming Reticulum packet (Context 0x01 = Record)
+	testRec := &storage.Record{
+		DataID:     "rec_direct_reticulum_999",
+		Collection: "direct_notes",
+		Text:       "Direct packet over Reticulum mesh without Cloudflare or Pi!",
+		Version:    1,
+	}
+	recPayload, _ := json.Marshal(testRec)
+	packet := &reticulum.Packet{
+		HeaderFlags: 0x00,
+		Hops:        0x00,
+		Destination: id.Destination(),
+		Context:     0x01,
+		Payload:     recPayload,
+	}
+
+	// Fake incoming packet dispatch
+	rnsMgr.BroadcastTCP(packet) // won't panic even with 0 clients
+
+	// Directly invoke the store upsert check as triggered by onPacket
+	stored, err := store.UpsertReplicatedRecord(testRec, nil, nil)
+	if err != nil || stored == nil {
+		t.Fatalf("Failed to store replicated record from Reticulum: %v", err)
+	}
+
+	retrieved, err := store.GetRecord("rec_direct_reticulum_999")
+	if err != nil || retrieved == nil || retrieved.Text != testRec.Text {
+		t.Fatalf("Record not found or text mismatch: got %v", retrieved)
 	}
 }

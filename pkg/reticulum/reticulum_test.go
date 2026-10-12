@@ -119,3 +119,51 @@ func TestHDLCFramingAndTCPServer(t *testing.T) {
 		t.Fatalf("Expected HDLC framing flags 0x7E at boundaries, got: %x ... %x", buf[0], buf[n-1])
 	}
 }
+
+func TestReticulumClientAndDirectPacketTransfer(t *testing.T) {
+	// Node 1 (Server/Hub)
+	hubID, _ := NewIdentity("testcloud.hub")
+	hubMgr := NewInterfaceManager(hubID)
+	port := 25252
+	if err := hubMgr.StartTCPAddr("127.0.0.1", port); err != nil {
+		t.Fatalf("StartTCPAddr failed: %v", err)
+	}
+	defer hubMgr.Stop()
+
+	receivedCh := make(chan *Packet, 1)
+	hubMgr.SetPacketHandler(func(p *Packet, addr net.Addr) {
+		if p.Context == 0x01 {
+			receivedCh <- p
+		}
+	})
+
+	// Node 2 (Client)
+	clientID, _ := NewIdentity("testcloud.client")
+	clientMgr := NewInterfaceManager(clientID)
+	defer clientMgr.Stop()
+
+	// Client connects to Hub via ConnectTCP
+	if err := clientMgr.ConnectTCP("127.0.0.1:25252"); err != nil {
+		t.Fatalf("ConnectTCP failed: %v", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Client sends a direct packet to Hub destination
+	testPayload := []byte(`{"data_id":"rec_mesh_direct_123","text":"Direct packet over Reticulum!"}`)
+	if err := clientMgr.SendPacketToDest(hubID.Destination(), 0x01, testPayload); err != nil {
+		t.Fatalf("SendPacketToDest failed: %v", err)
+	}
+
+	select {
+	case received := <-receivedCh:
+		if string(received.Payload) != string(testPayload) {
+			t.Fatalf("Payload mismatch: got %s, want %s", string(received.Payload), string(testPayload))
+		}
+		if received.Destination != hubID.Destination() {
+			t.Fatalf("Destination mismatch: got %s, want %s", received.Destination.Hex(), hubID.Destination().Hex())
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("Timed out waiting for packet over Reticulum TCP interface")
+	}
+}

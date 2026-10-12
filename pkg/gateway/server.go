@@ -1,10 +1,15 @@
 package gateway
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +18,7 @@ import (
 	"time"
 
 	"github.com/stiqrhub/testcloud/pkg/audit"
+	"github.com/stiqrhub/testcloud/pkg/crypto"
 	"github.com/stiqrhub/testcloud/pkg/dashboard"
 	"github.com/stiqrhub/testcloud/pkg/escrow"
 	"github.com/stiqrhub/testcloud/pkg/p2p"
@@ -27,6 +33,9 @@ type Server struct {
 	name        string
 	location    string
 	publicIP    string
+	gatewayURL  string
+	publicAddr  string
+	publicHosts []string
 	store       *storage.Store
 	swarm       *p2p.Swarm
 	escrowMgr   *escrow.Manager
@@ -45,6 +54,8 @@ type Config struct {
 	Name       string
 	Location   string
 	PublicIP   string
+	GatewayURL string
+	PublicAddr string
 	Store      *storage.Store
 	Swarm      *p2p.Swarm
 	EscrowMgr  *escrow.Manager
@@ -57,20 +68,41 @@ type Config struct {
 
 // NewServer builds the HTTP gateway server.
 func NewServer(cfg Config) *Server {
+	var pubHosts []string
+	for _, u := range []string{cfg.GatewayURL, cfg.PublicAddr} {
+		if u != "" {
+			parsed, err := url.Parse(u)
+			if err == nil && parsed.Hostname() != "" {
+				pubHosts = append(pubHosts, strings.ToLower(parsed.Hostname()))
+			} else {
+				h := strings.TrimPrefix(u, "http://")
+				h = strings.TrimPrefix(h, "https://")
+				h = strings.Split(h, "/")[0]
+				h = strings.Split(h, ":")[0]
+				if h != "" {
+					pubHosts = append(pubHosts, strings.ToLower(h))
+				}
+			}
+		}
+	}
+
 	s := &Server{
-		nodeID:     cfg.NodeID,
-		name:       cfg.Name,
-		location:   cfg.Location,
-		publicIP:   cfg.PublicIP,
-		store:      cfg.Store,
-		swarm:      cfg.Swarm,
-		escrowMgr:  cfg.EscrowMgr,
-		auditor:    cfg.Auditor,
-		rnsManager: cfg.RNSManager,
-		rnsDest:    cfg.RNSDest,
-		isPublic:   cfg.IsPublic,
-		standalone: cfg.Standalone,
-		mux:        http.NewServeMux(),
+		nodeID:      cfg.NodeID,
+		name:        cfg.Name,
+		location:    cfg.Location,
+		publicIP:    cfg.PublicIP,
+		gatewayURL:  cfg.GatewayURL,
+		publicAddr:  cfg.PublicAddr,
+		publicHosts: pubHosts,
+		store:       cfg.Store,
+		swarm:       cfg.Swarm,
+		escrowMgr:   cfg.EscrowMgr,
+		auditor:     cfg.Auditor,
+		rnsManager:  cfg.RNSManager,
+		rnsDest:     cfg.RNSDest,
+		isPublic:    cfg.IsPublic,
+		standalone:  cfg.Standalone,
+		mux:         http.NewServeMux(),
 	}
 
 	// Wire contract checker for expired/unpaid data eviction
@@ -150,20 +182,20 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/sync/records", s.handleSyncRecords)
 	s.mux.HandleFunc("/api/chunks/", s.handleChunks)
 
-	// Escrow & Storage Monetization API
-	s.mux.HandleFunc("/api/escrow/policy", s.handleEscrowPolicy)
-	s.mux.HandleFunc("/api/escrow/whitelist", s.handleEscrowWhitelist)
-	s.mux.HandleFunc("/api/storage/quota", s.handleStorageQuota)
+	// Escrow & Storage Monetization API (Admin - Local Only)
+	s.mux.HandleFunc("/api/escrow/policy", s.localOnly(s.handleEscrowPolicy))
+	s.mux.HandleFunc("/api/escrow/whitelist", s.localOnly(s.handleEscrowWhitelist))
+	s.mux.HandleFunc("/api/storage/quota", s.localOnly(s.handleStorageQuota))
 
-	// Auditing Trigger API
-	s.mux.HandleFunc("/api/audit/trigger", s.handleAuditTrigger)
+	// Auditing Trigger API (Admin - Local Only)
+	s.mux.HandleFunc("/api/audit/trigger", s.localOnly(s.handleAuditTrigger))
 
-	// Binary Download & One-Line Installer API
+	// Binary Download & One-Line Installer API (Public)
 	s.mux.HandleFunc("/download/", s.handleDownload)
 	s.mux.HandleFunc("/install.sh", s.handleInstallScript)
 	s.mux.HandleFunc("/install.ps1", s.handlePowerShellScript)
 
-	// Dashboard Integration
+	// Dashboard Integration (Admin - Local Only)
 	dash := dashboard.NewServer(
 		s.nodeID,
 		s.name,
@@ -177,16 +209,165 @@ func (s *Server) setupRoutes() {
 		s.rnsDest,
 		s.isPublic,
 	)
-	dash.RegisterRoutes(s.mux)
+	s.mux.HandleFunc("/dashboard", s.localOnly(dash.HandleDashboardHTML))
+	s.mux.HandleFunc("/api/dashboard/stats", s.localOnly(dash.HandleStatsJSON))
+	s.mux.HandleFunc("/api/dashboard/version", s.localOnly(dash.HandleVersionJSON))
+	s.mux.HandleFunc("/api/dashboard/records", s.localOnly(dash.HandleRecordsJSON))
 
-	// Root redirect to dashboard
+	// Reticulum Peer-to-Peer Packet API
+	s.mux.HandleFunc("/api/reticulum/send", s.handleReticulumSend)
+	s.mux.HandleFunc("/api/reticulum/announce", s.handleReticulumAnnounce)
+	s.mux.HandleFunc("/api/reticulum/status", s.handleReticulumStatus)
+
+	if s.rnsManager != nil {
+		s.rnsManager.SetPacketHandler(func(p *reticulum.Packet, addr net.Addr) {
+			if p.Context == 0x01 && len(p.Payload) > 0 {
+				payload := p.Payload
+				// Transparently decompress if gzip magic header detected
+				if len(payload) > 2 && payload[0] == 0x1f && payload[1] == 0x8b {
+					if gz, err := gzip.NewReader(bytes.NewReader(payload)); err == nil {
+						if decompressed, err := io.ReadAll(gz); err == nil {
+							payload = decompressed
+						}
+						_ = gz.Close()
+					}
+				}
+				var rec storage.Record
+				if err := json.Unmarshal(payload, &rec); err == nil && rec.DataID != "" {
+					log.Printf("[%s] [Reticulum] Direct record received: %s (collection: %s) from %s (%v)", s.nodeID, rec.DataID, rec.Collection, p.Destination.String(), addr)
+					if s.store != nil {
+						_, _ = s.store.UpsertReplicatedRecord(&rec, nil, nil)
+					}
+				}
+			}
+		})
+	}
+
+	// Root redirect: local requests redirect to /dashboard; public WAN requests receive gateway metadata
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			http.Redirect(w, r, "/dashboard", http.StatusFound)
+			if s.isLocalRequest(r) {
+				http.Redirect(w, r, "/dashboard", http.StatusFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"app_name":    version.AppName,
+				"version":     version.CurrentVersion,
+				"status":      "ok",
+				"message":     "TestCloud Decentralized Public Gateway & Discovery Rendezvous.",
+				"node_id":     s.nodeID,
+				"health":      "/api/health",
+				"peers":       "/api/peers",
+				"collections": "/api/collections/",
+			})
 			return
 		}
 		http.NotFound(w, r)
 	})
+}
+
+// isLocalRequest returns true ONLY if the request originates from localhost or a private LAN IP.
+// Any traffic arriving via Cloudflare Tunnel, public reverse proxies, or matching public domain names is rejected.
+func (s *Server) isLocalRequest(r *http.Request) bool {
+	// 1. Cloudflare Tunnel headers - if present, request came from public WAN via Cloudflare
+	if r.Header.Get("CF-Ray") != "" || r.Header.Get("CF-Connecting-IP") != "" || r.Header.Get("CF-Visitor") != "" {
+		return false
+	}
+
+	// 2. Check Host header: reject if it matches any configured public host (e.g. stiqrcloud.stiqrnotes.com)
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSpace(host))
+	for _, pubHost := range s.publicHosts {
+		if pubHost != "" && host == pubHost {
+			return false
+		}
+	}
+
+	// Reject if host is an external domain (not an IP, not localhost, and not a local domain like .local/.lan)
+	if parsedIP := net.ParseIP(host); parsedIP == nil {
+		if host != "localhost" && !strings.HasSuffix(host, ".local") && !strings.HasSuffix(host, ".lan") && !strings.HasSuffix(host, ".home") {
+			return false
+		}
+	}
+
+	// 3. Check X-Forwarded-For if present: reject if any forwarded IP is public
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for _, part := range parts {
+			ipStr := strings.TrimSpace(part)
+			ip := net.ParseIP(ipStr)
+			if ip != nil && !isPrivateOrLoopbackIP(ip) {
+				return false
+			}
+		}
+	}
+
+	// 4. Check RemoteAddr: must be loopback or private RFC 1918 LAN IP
+	remoteHost := r.RemoteAddr
+	if h, _, err := net.SplitHostPort(remoteHost); err == nil {
+		remoteHost = h
+	}
+	remoteIP := net.ParseIP(remoteHost)
+	if remoteIP == nil {
+		return false
+	}
+
+	return isPrivateOrLoopbackIP(remoteIP)
+}
+
+func isPrivateOrLoopbackIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate()
+}
+
+// localOnly wraps a handler to enforce that only local LAN or localhost requests can access it.
+func (s *Server) localOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.isLocalRequest(r) {
+			if strings.Contains(r.Header.Get("Accept"), "text/html") || r.URL.Path == "/dashboard" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>403 Forbidden - Local Access Only</title>
+  <style>
+    body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 32px; max-width: 520px; text-align: center; }
+    h1 { color: #f85149; margin-bottom: 12px; font-size: 1.5rem; }
+    p { line-height: 1.6; color: #8b949e; margin-bottom: 16px; font-size: 0.95rem; }
+    code { background: #21262d; padding: 3px 8px; border-radius: 4px; color: #58a6ff; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>403 Forbidden</h1>
+    <p>The TestCloud Node Dashboard is restricted to local network access only.</p>
+    <p>Administrative and telemetry views cannot be accessed over the public internet gateway. To access your dashboard, connect directly via your local LAN address:</p>
+    <p><code>http://&lt;local-ip&gt;:&lt;port&gt;/dashboard</code></p>
+  </div>
+</body>
+</html>`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"code":    403,
+				"status":  "forbidden",
+				"message": "Access denied: This administrative endpoint is restricted to local network access only.",
+			})
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -1518,6 +1699,19 @@ func (s *Server) handleDiscoveryAnnounce(w http.ResponseWriter, r *http.Request)
 	}
 
 	if s.swarm != nil && id != "" && id != s.nodeID {
+		pubIP := req.PublicIP
+		if pubIP == "" {
+			if cfIP := r.Header.Get("CF-Connecting-IP"); cfIP != "" {
+				pubIP = cfIP
+			} else if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				parts := strings.Split(xff, ",")
+				pubIP = strings.TrimSpace(parts[0])
+			} else {
+				if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+					pubIP = h
+				}
+			}
+		}
 		pubAddr := req.PublicAddr
 		if strings.Contains(pubAddr, "0.0.0.0") || strings.Contains(pubAddr, "127.0.0.1") || strings.Contains(pubAddr, "localhost") {
 			pubAddr = ""
@@ -1526,7 +1720,7 @@ func (s *Server) handleDiscoveryAnnounce(w http.ResponseWriter, r *http.Request)
 			NodeID:          id,
 			Name:            name,
 			Location:        req.Location,
-			PublicIP:        req.PublicIP,
+			PublicIP:        pubIP,
 			PublicAddr:      pubAddr,
 			ReticulumDest:   req.ReticulumDest,
 			IsPublic:        req.IsPublic,
@@ -1539,6 +1733,32 @@ func (s *Server) handleDiscoveryAnnounce(w http.ResponseWriter, r *http.Request)
 	var peers []*p2p.Peer
 	if s.swarm != nil {
 		peers = s.swarm.ListPeers()
+	}
+
+	// Ensure the discovery rendezvous host itself is always visible to registering peers
+	if s.nodeID != "" {
+		hasSelf := false
+		for _, p := range peers {
+			if p.NodeID == s.nodeID {
+				hasSelf = true
+				break
+			}
+		}
+		if !hasSelf {
+			selfPeer := &p2p.Peer{
+				NodeID:          s.nodeID,
+				Name:            s.name,
+				Location:        s.location,
+				PublicIP:        s.publicIP,
+				PublicAddr:      s.publicAddr,
+				ReticulumDest:   s.rnsDest,
+				IsPublic:        s.isPublic,
+				PricePerGBMonth: 100,
+				IsOnline:        true,
+				LastSeen:        time.Now().UTC(),
+			}
+			peers = append([]*p2p.Peer{selfPeer}, peers...)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1555,10 +1775,149 @@ func (s *Server) handleDiscoveryPeers(w http.ResponseWriter, r *http.Request) {
 		peers = s.swarm.ListPeers()
 	}
 
+	// Ensure discovery rendezvous host itself is visible
+	if s.nodeID != "" {
+		hasSelf := false
+		for _, p := range peers {
+			if p.NodeID == s.nodeID {
+				hasSelf = true
+				break
+			}
+		}
+		if !hasSelf {
+			selfPeer := &p2p.Peer{
+				NodeID:          s.nodeID,
+				Name:            s.name,
+				Location:        s.location,
+				PublicIP:        s.publicIP,
+				PublicAddr:      s.publicAddr,
+				ReticulumDest:   s.rnsDest,
+				IsPublic:        s.isPublic,
+				PricePerGBMonth: 100,
+				IsOnline:        true,
+				LastSeen:        time.Now().UTC(),
+			}
+			peers = append([]*p2p.Peer{selfPeer}, peers...)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"total_online": len(peers),
 		"peers":        peers,
+	})
+}
+
+func (s *Server) handleReticulumSend(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.rnsManager == nil {
+		http.Error(w, "Reticulum stack is not initialized on this node", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		TargetDest string `json:"target_dest"`
+		Collection string `json:"collection"`
+		Text       string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.TargetDest == "" {
+		http.Error(w, "target_dest is required (hex format or <hex>)", http.StatusBadRequest)
+		return
+	}
+	if req.Collection == "" {
+		req.Collection = "reticulum_direct"
+	}
+
+	dest, err := reticulum.DestinationFromHex(req.TargetDest)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid target_dest: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	dataID := fmt.Sprintf("rec_%s_%d", crypto.HashBytes([]byte(req.Text))[:12], time.Now().UnixNano()%100000)
+	rec := &storage.Record{
+		DataID:         dataID,
+		Collection:     req.Collection,
+		UserPubAddress: "stiqr_admin_operator_pubkey",
+		Version:        1,
+		Text:           req.Text,
+		TotalBytes:     int64(len(req.Text)),
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+
+	if s.store != nil {
+		_ = s.store.SaveRecord(rec)
+	}
+
+	payload, err := json.Marshal(rec)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to serialize record: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Transparently compress if approaching Reticulum MTU (500 bytes)
+	if len(payload) > 350 {
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		if _, err := gz.Write(payload); err == nil {
+			_ = gz.Close()
+			if buf.Len() < len(payload) {
+				payload = buf.Bytes()
+			}
+		}
+	}
+
+	if err := s.rnsManager.SendPacketToDest(dest, 0x01, payload); err != nil {
+		http.Error(w, fmt.Sprintf("failed to send Reticulum packet: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "sent",
+		"transport":   "reticulum_mesh",
+		"target_dest": req.TargetDest,
+		"data_id":     rec.DataID,
+		"record":      rec,
+	})
+}
+
+func (s *Server) handleReticulumAnnounce(w http.ResponseWriter, r *http.Request) {
+	if s.rnsManager == nil {
+		http.Error(w, "Reticulum stack is not initialized", http.StatusBadRequest)
+		return
+	}
+	if err := s.rnsManager.Announce([]byte("testcloud.node")); err != nil {
+		http.Error(w, fmt.Sprintf("announce failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "announced",
+		"rns_dest": s.rnsDest,
+	})
+}
+
+func (s *Server) handleReticulumStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	gw := ""
+	peers := 0
+	if s.rnsManager != nil {
+		gw = s.rnsManager.GetActiveGateway()
+		peers = s.rnsManager.GetPeersCount()
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"rns_dest":       s.rnsDest,
+		"active_gateway": gw,
+		"peers_seen":     peers,
 	})
 }
 
@@ -1596,6 +1955,9 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	http.ServeFile(w, r, foundPath)
 }
 
@@ -1684,6 +2046,7 @@ exec "$TARGET_BIN" \
   -host 0.0.0.0 \
   -port "$PORT" \
   -rns-port "$RNS_PORT" \
+  -rns-gateway "176.84.102.17:4242" \
   -discovery-url "$DISCOVERY_URL" \
   -peers "$DISCOVERY_URL" \
   -data-dir "$DEST_DIR/data" \
@@ -1712,19 +2075,32 @@ Write-Host "=================================================================="
 Write-Host "          Installing TestCloud Decentralized Node (Windows)       "
 Write-Host "=================================================================="
 
-Write-Host "-> Downloading TestCloud for Windows..."
-Invoke-WebRequest -Uri "%s/download/testcloud-windows-amd64.exe" -OutFile $binPath
+Get-Process -Name "testcloud*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 600
+try {
+    $conn = Get-NetTCPConnection -LocalPort 8100 -ErrorAction SilentlyContinue
+    if ($conn -and $conn.OwningProcess) {
+        Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    }
+} catch {}
+Remove-Item -Path $binPath -Force -ErrorAction SilentlyContinue
 
 $randomId = Get-Random -Minimum 1000 -Maximum 9999
+
+Write-Host "-> Downloading latest TestCloud for Windows..."
+Invoke-WebRequest -Uri "%s/download/testcloud-windows-amd64.exe?v=$randomId" -OutFile $binPath
+
 $nodeName = "WindowsNode-$randomId"
 $discoveryUrl = "%s"
 
 Write-Host "-> Starting TestCloud node '$nodeName'..."
 Write-Host "-> Connecting to discovery rendezvous: $discoveryUrl"
+Write-Host "-> Reticulum Mesh Gateway: 176.84.102.17:4242 (Air Barcelona)"
 Write-Host "-> Private Dashboard active at: http://localhost:8100/dashboard"
 Write-Host "=================================================================="
 
-& $binPath -host 0.0.0.0 -port 8100 -discovery-url "$discoveryUrl" -peers "$discoveryUrl" -data-dir "$destDir\data" -name "$nodeName"
+& $binPath -host 0.0.0.0 -port 8100 -rns-gateway "176.84.102.17:4242" -discovery-url "$discoveryUrl" -peers "$discoveryUrl" -data-dir "$destDir\data" -name "$nodeName"
 `, baseURL, baseURL)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

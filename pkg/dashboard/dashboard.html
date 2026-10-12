@@ -356,7 +356,7 @@
         <div class="card">
           <div class="card-title">Reticulum Destination</div>
           <div class="card-value mono" id="rns-dest" style="font-size:1.1rem;word-break:break-all;">-</div>
-          <div class="card-sub">16-byte cryptographic RNS address</div>
+          <div class="card-sub" id="rns-sub">16-byte cryptographic RNS address</div>
         </div>
         <div class="card">
           <div class="card-title">Mesh Peers (75/25 Weighted)</div>
@@ -588,6 +588,10 @@
         document.getElementById('mode-badge').innerText = data.is_public ? 'Public Gateway' : 'Private Node';
         document.getElementById('rns-dest').innerText = data.reticulum_dest || 'Not configured';
         document.getElementById('rns-badge').innerText = 'RNS: ' + (data.reticulum_dest ? 'Active' : 'Offline');
+        const rnsSub = document.getElementById('rns-sub');
+        if (rnsSub) {
+          rnsSub.innerText = data.reticulum_gateway ? ('Gateway: ' + data.reticulum_gateway) : '16-byte cryptographic RNS address';
+        }
         const onlineCount = data.online_peers_count !== undefined ? data.online_peers_count : data.peers_count;
         document.getElementById('stat-peers').innerHTML = `${onlineCount} <span style="font-size:0.9rem;font-weight:normal;color:var(--text-muted);">/ ${data.peers_count} Online</span>`;
         document.getElementById('stat-contracts').innerText = data.contracts_count;

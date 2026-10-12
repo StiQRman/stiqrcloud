@@ -176,16 +176,16 @@ func (s *Swarm) announceToDiscovery() {
 
 	if err := json.Unmarshal(bodyBytes, &discResp); err == nil && len(discResp.Peers) > 0 {
 		for _, p := range discResp.Peers {
-			if p.NodeID != localID && p.PublicAddr != localAddr && p.PublicAddr != "" {
-				s.RegisterPeer(p)
+			if p.NodeID != localID {
+				s.RegisterDirectPeer(p)
 			}
 		}
 	} else {
 		var peerList []*Peer
 		if err := json.Unmarshal(bodyBytes, &peerList); err == nil {
 			for _, p := range peerList {
-				if p.NodeID != localID && p.PublicAddr != localAddr && p.PublicAddr != "" {
-					s.RegisterPeer(p)
+				if p.NodeID != localID {
+					s.RegisterDirectPeer(p)
 				}
 			}
 		}
@@ -698,8 +698,18 @@ func (s *Swarm) ConnectPeer(peerURL string, rnsDest string, isPublic bool, price
 		}
 		if err := json.NewDecoder(annResp.Body).Decode(&annData); err == nil && len(annData.Peers) > 0 {
 			for _, kp := range annData.Peers {
-				if kp.NodeID != s.localID && kp.PublicAddr != s.localAddr && kp.PublicAddr != "" {
-					s.RegisterPeer(kp)
+				if kp.NodeID != s.localID {
+					s.RegisterDirectPeer(kp)
+					if kp.PublicAddr != s.localAddr && kp.PublicAddr != "" {
+						s.mu.RLock()
+						_, exists := s.peers[kp.NodeID]
+						s.mu.RUnlock()
+						if !exists {
+							go func(addr string) {
+								_ = s.ConnectPeer(addr, rnsDest, isPublic, price)
+							}(kp.PublicAddr)
+						}
+					}
 				}
 			}
 		}
@@ -713,8 +723,18 @@ func (s *Swarm) ConnectPeer(peerURL string, rnsDest string, isPublic bool, price
 		var knownPeers []*Peer
 		if err := json.NewDecoder(peersResp.Body).Decode(&knownPeers); err == nil {
 			for _, kp := range knownPeers {
-				if kp.NodeID != s.localID && kp.PublicAddr != s.localAddr && kp.PublicAddr != "" {
-					s.RegisterPeer(kp)
+				if kp.NodeID != s.localID {
+					s.RegisterDirectPeer(kp)
+					if kp.PublicAddr != s.localAddr && kp.PublicAddr != "" {
+						s.mu.RLock()
+						_, exists := s.peers[kp.NodeID]
+						s.mu.RUnlock()
+						if !exists {
+							go func(addr string) {
+								_ = s.ConnectPeer(addr, rnsDest, isPublic, price)
+							}(kp.PublicAddr)
+						}
+					}
 				}
 			}
 		}
@@ -775,14 +795,17 @@ func (s *Swarm) GossipPeers() {
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&annResp); err == nil && len(annResp.Peers) > 0 {
 				for _, kp := range annResp.Peers {
-					if kp.NodeID != s.localID && kp.PublicAddr != s.localAddr && kp.PublicAddr != "" {
-						s.mu.RLock()
-						_, exists := s.peers[kp.NodeID]
-						s.mu.RUnlock()
-						if !exists {
-							go func(addr string) {
-								_ = s.ConnectPeer(addr, rnsDest, isPublic, price)
-							}(kp.PublicAddr)
+					if kp.NodeID != s.localID {
+						s.RegisterDirectPeer(kp)
+						if kp.PublicAddr != s.localAddr && kp.PublicAddr != "" {
+							s.mu.RLock()
+							_, exists := s.peers[kp.NodeID]
+							s.mu.RUnlock()
+							if !exists {
+								go func(addr string) {
+									_ = s.ConnectPeer(addr, rnsDest, isPublic, price)
+								}(kp.PublicAddr)
+							}
 						}
 					}
 				}
@@ -796,14 +819,17 @@ func (s *Swarm) GossipPeers() {
 			var peerList []*Peer
 			if err := json.NewDecoder(getResp.Body).Decode(&peerList); err == nil {
 				for _, kp := range peerList {
-					if kp.NodeID != s.localID && kp.PublicAddr != s.localAddr && kp.PublicAddr != "" {
-						s.mu.RLock()
-						_, exists := s.peers[kp.NodeID]
-						s.mu.RUnlock()
-						if !exists {
-							go func(addr string) {
-								_ = s.ConnectPeer(addr, rnsDest, isPublic, price)
-							}(kp.PublicAddr)
+					if kp.NodeID != s.localID {
+						s.RegisterDirectPeer(kp)
+						if kp.PublicAddr != s.localAddr && kp.PublicAddr != "" {
+							s.mu.RLock()
+							_, exists := s.peers[kp.NodeID]
+							s.mu.RUnlock()
+							if !exists {
+								go func(addr string) {
+									_ = s.ConnectPeer(addr, rnsDest, isPublic, price)
+								}(kp.PublicAddr)
+							}
 						}
 					}
 				}
@@ -826,21 +852,21 @@ func (s *Swarm) ProbePeers() {
 
 	for id, p := range s.peers {
 		// Clean up dead nodes:
-		// 1) Ephemeral edge nodes with no PublicAddr that haven't announced in > 30 seconds
-		// 2) Nodes marked offline that haven't been seen in > 3 minutes
-		if p.PublicAddr == "" && now.Sub(p.LastSeen) > 30*time.Second {
+		// 1) Ephemeral edge nodes with no PublicAddr that haven't announced in > 10 minutes
+		// 2) Nodes marked offline that haven't been seen in > 15 minutes
+		if p.PublicAddr == "" && now.Sub(p.LastSeen) > 10*time.Minute {
 			toPrune = append(toPrune, id)
 			continue
 		}
-		if !p.IsOnline && now.Sub(p.LastSeen) > 3*time.Minute {
+		if !p.IsOnline && now.Sub(p.LastSeen) > 15*time.Minute {
 			toPrune = append(toPrune, id)
 			continue
 		}
 
 		// For edge nodes with no inbound public address:
-		// Liveness is driven by periodic discovery announcements (within 15s)
+		// Liveness is driven by periodic discovery announcements (within 60s)
 		if p.PublicAddr == "" {
-			if now.Sub(p.LastSeen) <= 15*time.Second {
+			if now.Sub(p.LastSeen) <= 60*time.Second {
 				p.IsOnline = true
 			} else {
 				p.IsOnline = false

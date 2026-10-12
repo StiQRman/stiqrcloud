@@ -32,6 +32,7 @@ func main() {
 	nodeID := flag.String("node-id", "", "Custom node identifier (auto-generated if empty)")
 	isPublic := flag.Bool("public", false, "Expose node as a public gateway")
 	rnsPort := flag.Int("rns-port", 4242, "Reticulum UDP interface port")
+	rnsGateway := flag.String("rns-gateway", "176.84.102.17:4242", "Primary Reticulum TCP gateway (e.g. 176.84.102.17:4242 Air Barcelona)")
 	price := flag.Int64("price", 100, "Price per GB per month in sats")
 	peers := flag.String("peers", "", "Comma-separated list of peer bootstrap URLs (e.g. http://127.10.1.1:8101)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
@@ -86,6 +87,10 @@ func main() {
 		}
 		if err := rnsManager.StartTCPAddr(*host, *rnsPort); err != nil {
 			log.Printf("Warning: Failed to bind Reticulum TCP interface on %s:%d: %v", *host, *rnsPort, err)
+		}
+		if *rnsGateway != "" {
+			gateways := []string{*rnsGateway, "77.37.146.243:4242"}
+			rnsManager.ConnectTCPWithFailover(gateways)
 		}
 	}
 
@@ -150,6 +155,8 @@ func main() {
 		Name:       *name,
 		Location:   *location,
 		PublicIP:   *publicIP,
+		GatewayURL: *gatewayURL,
+		PublicAddr: *publicAddr,
 		Store:      store,
 		Swarm:      swarm,
 		EscrowMgr:  escrowMgr,
@@ -175,6 +182,9 @@ func main() {
 	fmt.Printf(" Public REST API:     http://%s:%d/api\n", *host, *port)
 	fmt.Printf(" Reticulum UDP & TCP: %s:%d\n", *host, *rnsPort)
 	fmt.Printf(" Reticulum RNS Dest:  %s\n", rnsDest)
+	if *rnsGateway != "" {
+		fmt.Printf(" Reticulum Gateway:   %s (Failover: Catz Node)\n", *rnsGateway)
+	}
 	fmt.Printf(" Storage Directory:   %s\n", absDataDir)
 	fmt.Printf(" Settings Updates:    %s\n", version.CurrentVersion)
 	fmt.Println("======================================================================")

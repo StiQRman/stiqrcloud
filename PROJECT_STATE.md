@@ -257,13 +257,62 @@
     - Multi-process CLI end-to-end binary tests verified record and chunk replication from Gateway to NAT Edge Node.
     - All release static binaries compiled and archived (`testcloud`, `testcloud-linux-amd64`, `testcloud-linux-arm64`, `testcloud-windows-amd64.exe`).
 
+- **Phase 8: Zero-Network-Impact Multi-Region Cluster Console & Interactive Live TUI (Completed & Verified)**:
+  - **Problem Solved**: Deploying and observing 6 separate nodes across multiple terminals or browser tabs was cumbersome, and discovery calls to external LAN devices (`192.168.1.50:8100`) caused unwanted network traffic and potential slowdowns.
+  - **Zero-Network Loopback Isolation**: Configured cluster to run on Linux loopback subnets (`127.10.1.1` through `127.10.6.1` on `127.0.0.0/8`). Zero bytes leave the host machine; 0% load on home Wi-Fi, Ethernet, or WAN router. Alice (`http://127.10.1.1:8101`) acts as local seed and discovery rendezvous.
+  - **Simulated Multi-Region WAN Distribution**: Nodes bind locally while advertising distinct global WAN IPs and regions across 4 continents:
+    - Alice: `104.200.134.8` (Dallas, TX - North America) | Auditor 1 (Gateway)
+    - Bob: `199.195.250.77` (New York, NY - North America) | Co-Auditor 2
+    - Charlie: `51.89.151.107` (London, UK - Europe) | Co-Auditor 3
+    - Daiki: `133.242.180.12` (Tokyo, JP - Asia) | Storage Node 1
+    - Elena: `185.220.100.255` (Frankfurt, DE - Europe) | Storage Node 2
+    - Finn: `13.70.151.12` (Sydney, AU - Oceania) | Storage Node 3
+  - **Interactive Terminal Live Console ([scripts/cluster_console.py](scripts/cluster_console.py))**:
+    - Real-time curses/ANSI status dashboard table showing node health, roles, stored records, latency, and peer counts.
+    - Live unified cross-node color-coded log feed streaming events from all 6 nodes simultaneously.
+    - Hotkeys for instant verification: `[t]` to inject encrypted test records across quorum, `[1]`-`[6]` to knock nodes offline / revive them to observe self-healing failover live, and `[w]` for Web Dashboard link.
+- **Phase 9: Local-Only Operator Dashboard & Administrative API Protection (Completed & Verified Live)**:
+  - **Problem Solved**: The web dashboard (`/dashboard`), telemetry endpoints (`/api/dashboard/*`), and admin policy controls (`/api/escrow/*`, `/api/storage/quota`) were accessible over the public internet gateway via Cloudflare Tunnel (`stiqrcloud.stiqrnotes.com`), creating a security hazard where unauthenticated internet users could view node telemetry or tamper with storage pricing and whitelist policies.
+  - **Local-Only Access Control Middleware**: Implemented `isLocalRequest` and `localOnly` middleware in [`pkg/gateway/server.go`](pkg/gateway/server.go). Any request carrying Cloudflare headers (`CF-Ray`, `CF-Connecting-IP`, `CF-Visitor`), public `Host` headers (`stiqrcloud.stiqrnotes.com`), or originating from non-private IP addresses is rejected with `403 Forbidden`.
+  - **Public Root Gateway Metadata**: Changed root `/` handler so that public internet visitors receive JSON gateway information rather than being redirected to the private operator dashboard.
+  - **Live Verification on Physical Pi**:
+    - Cross-compiled ARM64 static binary (`testcloud-linux-arm64`) and deployed to `192.168.1.50:/opt/stiqrcloud/stiqrcloud`.
+    - Restarted `stiqrcloud.service`.
+    - Verified `https://stiqrcloud.stiqrnotes.com/dashboard` returns **HTTP 403 Forbidden**.
+    - Verified `https://stiqrcloud.stiqrnotes.com/api/escrow/policy` returns **HTTP 403 Forbidden**.
+    - Verified `http://192.168.1.50:8100/dashboard` on local LAN returns **HTTP 200 OK**.
+    - Verified public API routes (`/api/health`, `/api/peers`, `/api/sync/records`) remain 100% accessible to edge nodes and mobile clients.
+
+- **Phase 10: Public Reticulum Backbone & Priority Failover Gateway Configuration (Completed & Live)**:
+  - **Problem Solved**: Needed a verified, always-on connection to the global public Reticulum mesh across external networks without port forwarding, with a dedicated primary gateway and automatic multi-tier failover.
+  - **Live Backbone Probe**: Tested active clearnet hubs from `directory.rns.recipes` and configured four verified hubs in [`~/.reticulum/config`](~/.reticulum/config):
+    - **Primary Gateway**: `Air Barcelona` (`176.84.102.17:4242`) — Configured with `bitrate = 10000000` (10 Mbps, lowest metric cost).
+    - **Backup 1**: `Burger Backbone` (`188.169.142.232:4242`) — Configured with `bitrate = 5000000` (5 Mbps).
+    - **Backup 2**: `Catz Node` (`77.37.146.243:4242`) — Configured with `bitrate = 2000000` (2 Mbps).
+    - **Backup 3**: `AT Vienna` (`rns.radical.computer:4242`) — Configured with `bitrate = 1000000` (1 Mbps).
+  - **Prioritized Failover Routing**: Because Reticulum path calculations prioritize interfaces with higher bitrate metrics, 100% of mesh announces and packet streaming route through the Primary Gateway when online. If Primary drops, Reticulum automatically fails over to the next highest available backup, while continuously attempting to reconnect to the Primary every 5 seconds in the background.
+  - **Daemon Management & Stability**:
+    - Enabled `shared_instance_type = tcp` (port 37428) in [`~/.reticulum/config`](~/.reticulum/config) to resolve Python 3.12 epoll socket disconnect issues.
+    - Configured systemd user service [`~/.config/systemd/user/rnsd.service`](~/.config/systemd/user/rnsd.service) ensuring 24/7 background uptime and auto-restart on failure.
+    - Created helper tool [`scripts/rns_manager.sh`](scripts/rns_manager.sh) for single-command start, stop, restart, and `rnstatus` monitoring.
+
+- **Phase 11: Live Workstation Edge Node Deployment & Peer Rendezvous Verification (Completed & Live)**:
+  - **Node Execution**: Started `workstation-node` daemon on workstation PC binding HTTP port `8100` and Reticulum port `4242` with data directory in `./data/workstation`.
+  - **Outbound Discovery Rendezvous**: Node successfully registered with public rendezvous server `https://stiqrcloud.stiqrnotes.com`. Verified via Pi peer table:
+    - Node ID: `workstation-node` (online, heartbeats every 3s).
+    - Other active peers visible: `WindowsNode-2278`.
+  - **Reticulum Mesh Bridging**: Local `rnsd` daemon attached to `TCPInterface[TestCloud Gateway/127.10.1.1:4242]` (**Status: Up**), bridging the node into the global Reticulum mesh (`Air Barcelona Primary` & `Catz Node`).
+  - **Pull-Sync Verification**: Automatically synchronized 232 records from the network over outbound HTTPS without requiring port forwarding.
+  - **Record Creation & Retrieval**: Created record `rec_975fe9fef8baf938e733e48d_45152` with Free Storage Agreement and invariant Merkle root.
+  - **Local Dashboard**: Fully operational and protected at `http://localhost:8100/dashboard`.
+
 ### Planned Next Steps
-1. **Physical Raspberry Pi Binary Deployment**:
-   - When authorized by user, copy updated ARM64 binary (`testcloud-linux-arm64`) to `node-operator@192.168.1.50:/opt/stiqrcloud/stiqrcloud` and restart `stiqrcloud.service`.
-2. **Interactive Escrow Settlement & Audit Challenge Loop**:
+1. **Interactive Escrow Settlement & Audit Challenge Loop**:
    - Settle mock Lightning invoices via webhook / API call.
    - Trigger automated periodic Merkle audits against storage peers and log reputation score bumps on the dashboard.
-3. **TypeScript / JavaScript Client SDK**:
+2. **TypeScript / JavaScript Client SDK**:
    - Port SDK conventions to `sdk/ts` for web browser frontends and Node.js.
-4. **Remote Staging / Publication**:
+3. **Remote Staging / Publication**:
    - When authorized by user, push repository to GitHub / stiqrhub with tagged release.
+
+

@@ -1,6 +1,7 @@
 package reticulum
 
 import (
+	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -8,14 +9,16 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
 
 // Standard Reticulum Constants
 const (
-	DestinationLength = 16 // 16 bytes (128 bits)
-	HeaderMinLength   = 19 // Flags (1) + Hops (1) + Destination (16) + Context (1)
+	DestinationLength = 16  // 16 bytes (128 bits)
+	HeaderMinLength   = 19  // Flags (1) + Hops (1) + Destination (16) + Context (1)
+	MaxMTU            = 500 // Reticulum Maximum Transmission Unit
 	DefaultRNSAspect  = "testcloud.node"
 	DefaultRNSPort    = 4242 // Default Reticulum TCP/UDP port
 )
@@ -49,44 +52,102 @@ func DestinationFromHex(s string) (Destination, error) {
 }
 
 // Identity holds a Reticulum node identity.
+// In Reticulum specification:
+// - PublicKey is 64 bytes: 32 bytes X25519 (ECDH) + 32 bytes Ed25519 (Signatures).
+// - PrivateKey is 64 bytes: 32 bytes X25519 private key + 32 bytes Ed25519 private key seed.
 type Identity struct {
-	PublicKey  ed25519.PublicKey
-	PrivateKey ed25519.PrivateKey
+	x25519Priv *ecdh.PrivateKey
+	sigPubKey  ed25519.PublicKey
+	sigPrivKey ed25519.PrivateKey
+	PublicKey  []byte // 64 bytes combined
 	Aspect     string
 }
 
-// NewIdentity generates a new cryptographic Reticulum Identity.
+// NewIdentity generates a new cryptographic Reticulum Identity conforming to standard RNS.
 func NewIdentity(aspect string) (*Identity, error) {
 	if aspect == "" {
 		aspect = DefaultRNSAspect
 	}
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	xPriv, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to generate X25519 key: %w", err)
 	}
+	edPub, edPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate Ed25519 key: %w", err)
+	}
+
+	pubBytes := make([]byte, 64)
+	copy(pubBytes[:32], xPriv.PublicKey().Bytes())
+	copy(pubBytes[32:], edPub)
+
 	return &Identity{
-		PublicKey:  pub,
-		PrivateKey: priv,
+		x25519Priv: xPriv,
+		sigPubKey:  edPub,
+		sigPrivKey: edPriv,
+		PublicKey:  pubBytes,
 		Aspect:     aspect,
 	}, nil
 }
 
-// Destination computes the 16-byte Reticulum destination hash: SHA256(aspect + pubkey)[:16].
+// Destination computes the 16-byte Reticulum destination hash:
+// In Reticulum standard:
+// name_hash = sha256(aspect)[:10]
+// id_hash = sha256(pubkey_64_bytes)[:16]
+// destination_hash = sha256(name_hash + id_hash)[:16]
 func (id *Identity) Destination() Destination {
-	h := sha256.New()
-	h.Write([]byte(id.Aspect))
-	h.Write(id.PublicKey)
-	sum := h.Sum(nil)
+	nameH := sha256.Sum256([]byte(id.Aspect))
+	idH := sha256.Sum256(id.PublicKey)
+	combined := append(nameH[:10], idH[:16]...)
+	destH := sha256.Sum256(combined)
 
 	var dest Destination
-	copy(dest[:], sum[:DestinationLength])
+	copy(dest[:], destH[:DestinationLength])
 	return dest
+}
+
+// BuildAnnouncePacket creates a standard Reticulum Announce packet conforming to the Reticulum Network Stack.
+func (id *Identity) BuildAnnouncePacket(appData []byte) *Packet {
+	dest := id.Destination()
+	nameH := sha256.Sum256([]byte(id.Aspect))
+	nameHash := nameH[:10]
+
+	randomBytes := make([]byte, 10)
+	_, _ = rand.Read(randomBytes)
+
+	// signed_data = dest_hash (16) + public_key (64) + name_hash (10) + random_hash (10) + app_data
+	signedData := make([]byte, 0, 16+64+10+10+len(appData))
+	signedData = append(signedData, dest[:]...)
+	signedData = append(signedData, id.PublicKey...)
+	signedData = append(signedData, nameHash...)
+	signedData = append(signedData, randomBytes...)
+	signedData = append(signedData, appData...)
+
+	sig := ed25519.Sign(id.sigPrivKey, signedData)
+
+	// announce_data = public_key (64) + name_hash (10) + random_hash (10) + sig (64) + app_data
+	annData := make([]byte, 0, 64+10+10+64+len(appData))
+	annData = append(annData, id.PublicKey...)
+	annData = append(annData, nameHash...)
+	annData = append(annData, randomBytes...)
+	annData = append(annData, sig...)
+	annData = append(annData, appData...)
+
+	return &Packet{
+		HeaderFlags: 0x01, // ANNOUNCE = 1, HEADER_1 = 0
+		Hops:        0x00,
+		Destination: dest,
+		Context:     0x00,
+		Payload:     annData,
+	}
 }
 
 // AnnouncePacket represents a Reticulum Announce payload.
 type AnnouncePacket struct {
 	Destination Destination `json:"destination"`
 	PublicKey   string      `json:"public_key"`
+	NameHash    []byte      `json:"name_hash"`
+	RandomHash  []byte      `json:"random_hash"`
 	AppData     []byte      `json:"app_data"`
 	Timestamp   time.Time   `json:"timestamp"`
 	Signature   string      `json:"signature"`
@@ -94,28 +155,22 @@ type AnnouncePacket struct {
 
 // CreateAnnounce creates and signs an Announce packet.
 func (id *Identity) CreateAnnounce(appData []byte) (*AnnouncePacket, error) {
-	dest := id.Destination()
-	now := time.Now().UTC()
-
-	// Data to sign: destination + appData + timestamp
-	toSign := append(dest[:], appData...)
-	toSign = append(toSign, []byte(now.Format(time.RFC3339))...)
-
-	sig := ed25519.Sign(id.PrivateKey, toSign)
-
+	annPacket := id.BuildAnnouncePacket(appData)
 	return &AnnouncePacket{
-		Destination: dest,
+		Destination: annPacket.Destination,
 		PublicKey:   hex.EncodeToString(id.PublicKey),
+		NameHash:    annPacket.Payload[64 : 64+10],
+		RandomHash:  annPacket.Payload[64+10 : 64+20],
 		AppData:     appData,
-		Timestamp:   now,
-		Signature:   hex.EncodeToString(sig),
+		Timestamp:   time.Now().UTC(),
+		Signature:   hex.EncodeToString(annPacket.Payload[64+20 : 64+20+64]),
 	}, nil
 }
 
 // VerifyAnnounce verifies an Announce packet.
 func VerifyAnnounce(ann *AnnouncePacket) bool {
 	pubBytes, err := hex.DecodeString(ann.PublicKey)
-	if err != nil || len(pubBytes) != ed25519.PublicKeySize {
+	if err != nil || len(pubBytes) != 64 {
 		return false
 	}
 	sigBytes, err := hex.DecodeString(ann.Signature)
@@ -123,10 +178,14 @@ func VerifyAnnounce(ann *AnnouncePacket) bool {
 		return false
 	}
 
-	toSign := append(ann.Destination[:], ann.AppData...)
-	toSign = append(toSign, []byte(ann.Timestamp.Format(time.RFC3339))...)
+	signedData := make([]byte, 0, 16+64+10+10+len(ann.AppData))
+	signedData = append(signedData, ann.Destination[:]...)
+	signedData = append(signedData, pubBytes...)
+	signedData = append(signedData, ann.NameHash...)
+	signedData = append(signedData, ann.RandomHash...)
+	signedData = append(signedData, ann.AppData...)
 
-	return ed25519.Verify(pubBytes, toSign, sigBytes)
+	return ed25519.Verify(pubBytes[32:], signedData, sigBytes)
 }
 
 // Packet encapsulates a Reticulum wire packet.
@@ -213,14 +272,16 @@ func FrameHDLC(data []byte) []byte {
 
 // InterfaceManager manages local Reticulum networking interfaces (UDP/TCP listeners).
 type InterfaceManager struct {
-	mu          sync.RWMutex
-	identity    *Identity
-	udpConn     *net.UDPConn
-	tcpListener net.Listener
-	tcpClients  map[string]net.Conn
-	listening   bool
-	peers       map[string]time.Time // destination hex -> last seen
-	onPacket    func(p *Packet, addr net.Addr)
+	mu            sync.RWMutex
+	identity      *Identity
+	udpConn       *net.UDPConn
+	tcpListener   net.Listener
+	tcpClients    map[string]net.Conn
+	activeGateway string
+	listening     bool
+	peers         map[string]time.Time // destination hex -> last seen
+	onPacket      func(p *Packet, addr net.Addr)
+	stopCh        chan struct{}
 }
 
 // NewInterfaceManager creates a Reticulum interface manager.
@@ -229,6 +290,7 @@ func NewInterfaceManager(identity *Identity) *InterfaceManager {
 		identity:   identity,
 		peers:      make(map[string]time.Time),
 		tcpClients: make(map[string]net.Conn),
+		stopCh:     make(chan struct{}),
 	}
 }
 
@@ -296,18 +358,9 @@ func (im *InterfaceManager) acceptTCP(l net.Listener) {
 
 		// Send initial Announce frame over TCP to newly connected peer (e.g. Columba)
 		if im.identity != nil {
-			ann, err := im.identity.CreateAnnounce([]byte("testcloud.node"))
-			if err == nil {
-				annPacket := &Packet{
-					HeaderFlags: 0x00,
-					Hops:        0x00,
-					Destination: ann.Destination,
-					Context:     0x00,
-					Payload:     append(ann.Destination[:], ann.AppData...),
-				}
-				frame := FrameHDLC(EncodePacket(annPacket))
-				_, _ = conn.Write(frame)
-			}
+			annPacket := im.identity.BuildAnnouncePacket([]byte("testcloud.node"))
+			frame := FrameHDLC(EncodePacket(annPacket))
+			_, _ = conn.Write(frame)
 		}
 
 		go im.readTCP(conn, remote)
@@ -355,6 +408,145 @@ func (im *InterfaceManager) readTCP(conn net.Conn, remote string) {
 			}
 		}
 	}
+}
+
+// ConnectTCP establishes an outbound TCP connection to a Reticulum hub or gateway (HDLC framed).
+func (im *InterfaceManager) ConnectTCP(targetAddr string) error {
+	conn, err := net.DialTimeout("tcp", targetAddr, 6*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Reticulum gateway %s: %w", targetAddr, err)
+	}
+
+	im.mu.Lock()
+	im.tcpClients[targetAddr] = conn
+	im.mu.Unlock()
+
+	// Send initial Announce frame over TCP to newly connected gateway
+	if im.identity != nil {
+		annPacket := im.identity.BuildAnnouncePacket([]byte("testcloud.node"))
+		frame := FrameHDLC(EncodePacket(annPacket))
+		_, _ = conn.Write(frame)
+	}
+
+	go im.readTCP(conn, targetAddr)
+	return nil
+}
+
+// BroadcastTCP sends an HDLC framed Reticulum packet across all connected TCP interfaces and gateways.
+func (im *InterfaceManager) BroadcastTCP(p *Packet) error {
+	data := EncodePacket(p)
+	frame := FrameHDLC(data)
+
+	im.mu.RLock()
+	clients := make([]net.Conn, 0, len(im.tcpClients))
+	for _, c := range im.tcpClients {
+		clients = append(clients, c)
+	}
+	im.mu.RUnlock()
+
+	if len(clients) == 0 {
+		return nil
+	}
+
+	var writeErr error
+	sent := 0
+	for _, c := range clients {
+		if _, err := c.Write(frame); err != nil {
+			writeErr = err
+		} else {
+			sent++
+		}
+	}
+
+	if sent == 0 && writeErr != nil {
+		return writeErr
+	}
+	return nil
+}
+
+// SendPacketToDest sends a packet to a specific Reticulum Destination over TCP mesh and UDP.
+func (im *InterfaceManager) SendPacketToDest(dest Destination, context byte, payload []byte) error {
+	if HeaderMinLength+len(payload) > MaxMTU {
+		return fmt.Errorf("packet size %d exceeds Reticulum MTU (%d bytes)", HeaderMinLength+len(payload), MaxMTU)
+	}
+	p := &Packet{
+		HeaderFlags: 0x00,
+		Hops:        0x00,
+		Destination: dest,
+		Context:     context,
+		Payload:     payload,
+	}
+
+	return im.BroadcastTCP(p)
+}
+
+// Announce broadcasts a signed Announce packet across all active interfaces.
+func (im *InterfaceManager) Announce(appData []byte) error {
+	if im.identity == nil {
+		return errors.New("cannot announce without identity")
+	}
+
+	annPacket := im.identity.BuildAnnouncePacket(appData)
+	return im.BroadcastTCP(annPacket)
+}
+
+// ConnectTCPWithFailover connects to the primary Reticulum gateway with automated failover to backups.
+func (im *InterfaceManager) ConnectTCPWithFailover(gateways []string) {
+	if len(gateways) == 0 {
+		return
+	}
+
+	go func() {
+		for {
+			select {
+			case <-im.stopCh:
+				return
+			default:
+			}
+
+			connected := false
+			for _, gw := range gateways {
+				gw = strings.TrimSpace(gw)
+				if gw == "" {
+					continue
+				}
+
+				im.mu.RLock()
+				_, already := im.tcpClients[gw]
+				im.mu.RUnlock()
+				if already {
+					connected = true
+					break
+				}
+
+				if err := im.ConnectTCP(gw); err == nil {
+					im.mu.Lock()
+					im.activeGateway = gw
+					im.mu.Unlock()
+					connected = true
+					break
+				}
+			}
+
+			// Periodic announce to keep destination active on gateway
+			if connected {
+				_ = im.Announce([]byte("testcloud.node"))
+			}
+
+			select {
+			case <-im.stopCh:
+				return
+			case <-time.After(30 * time.Second):
+			}
+		}
+	}()
+}
+
+// GetActiveGateway returns the current connected Reticulum gateway address.
+func (im *InterfaceManager) GetActiveGateway() string {
+	im.mu.RLock()
+	defer im.mu.RUnlock()
+	return im.activeGateway
 }
 
 // SendPacket sends a Reticulum packet to target UDP address (host:port).
@@ -420,6 +612,11 @@ func (im *InterfaceManager) Stop() {
 	im.mu.Lock()
 	defer im.mu.Unlock()
 	im.listening = false
+	select {
+	case <-im.stopCh:
+	default:
+		close(im.stopCh)
+	}
 	if im.udpConn != nil {
 		_ = im.udpConn.Close()
 		im.udpConn = nil

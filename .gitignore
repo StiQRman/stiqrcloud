@@ -2,6 +2,7 @@
 /testcloud
 /testcloud.exe
 /testcloud-arm64
+/testcloud-*
 /bin/
 
 # Node Runtime Data
@@ -20,3 +21,7 @@ Thumbs.db
 *~
 .idea/
 .vscode/
+
+# Python
+__pycache__/
+*.py[cod]
