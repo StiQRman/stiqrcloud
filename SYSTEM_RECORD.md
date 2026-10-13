@@ -170,9 +170,28 @@ pkill -9 testcloud
   - Operator dashboard remains 100% accessible locally via `http://192.168.1.50:8100/dashboard` or `http://localhost:8100/dashboard`.
   - Unit tests verified in `TestDashboardLocalOnlyProtection` and deployed live to Raspberry Pi `192.168.1.50`.
 
+### 7. User-Controlled Data Placement & Storage Routing Policies
+- **Problem Solved**: Stored records were previously always pushed into a standard 3-storage-node mesh quorum. App users had no mechanism to keep private data strictly on their own node, or to designate specific trusted peer nodes for backup.
+- **Implementation**:
+  - Added `ReplicationPolicy` (`"local"`, `"replicated_2"`, `"distributed"`, `"custom"`) and `TargetReplicas` to `storage.Record`:
+    - **`local-only` / `local`**: Kept exclusively on user's node. 0 remote storage nodes assigned; zero network broadcast; airgapped from `/api/sync/records` peer pull sync loops (and dynamic backfill).
+    - **`replicated-2` / `distributed_2`**: Data is saved on the user's node and replicated to exactly 2 peer storage nodes (dynamic selection via `SelectQuorumWithCounts(3, 2)`).
+    - **`custom`**: User supplies explicit `storage_peers` array; backend replicates strictly to those target nodes without overriding.
+    - **`full-mesh` / `distributed`**: Standard 3-node storage quorum.
+  - Integration verified via `TestStoragePoliciesAndUserControl` in [`pkg/gateway/server_test.go`](pkg/gateway/server_test.go).
+
+### 8. Official TypeScript & JavaScript Client SDK (`@stiqrhub/testcloud`)
+- **Location**: [`sdk/ts/`](sdk/ts)
+- **Runtime Support**: Works in Node.js 18+, modern web browsers, React, Vue, Svelte, and React Native with zero external runtime dependencies.
+- **Core Modules**:
+  - **`NodeManager`** ([`sdk/ts/src/node-manager.ts`](sdk/ts/src/node-manager.ts)): Multi-node management allowing app users to connect their own local node (`http://localhost:8100`), add custom self-hosted nodes (Raspberry Pi, VPS, friend's node), switch primary nodes dynamically, and probe health/latency.
+  - **`TestCloudClient`** ([`sdk/ts/src/client.ts`](sdk/ts/src/client.ts)): Complete client supporting `storagePolicy` (`local-only`, `replicated-2`, `custom`), attachments, and PocketBase-compatible collection API.
+  - **`TestCloudCrypto`** ([`sdk/ts/src/crypto.ts`](sdk/ts/src/crypto.ts)): Client-side AES-256-GCM zero-knowledge encryption using Web Crypto API (`crypto.subtle`) and Ed25519 signing.
+  - **Test Suite**: 22 unit and live backend integration tests in [`sdk/ts/test/`](sdk/ts/test).
+
 ---
 
-## 6. Verification Endpoints
+## 6. Verification Endpoints & Test Commands
 
 ```bash
 # Public Gateway health check (Open to WAN)
@@ -189,4 +208,11 @@ curl -I https://stiqrcloud.stiqrnotes.com/dashboard
 
 # Private Operator Dashboard (Local LAN ONLY)
 http://192.168.1.50:8100/dashboard
+
+# Run Go backend test suite
+go test -count=1 ./...
+
+# Run TypeScript SDK test suite (Builds + runs all 22 tests)
+cd sdk/ts && npm test
 ```
+
