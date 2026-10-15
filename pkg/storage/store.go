@@ -395,6 +395,22 @@ func (s *Store) CreateRecord(rec *Record, fileData []byte, picData []byte) (*Rec
 	textHash := crypto.HashBytes([]byte(rec.Text))
 	chunkHashes = append(chunkHashes, textHash)
 
+	// Verify owner signature if supplied on creation
+	if rec.UserPubAddress != "" && rec.OwnerSignature != "" {
+		toSign1 := []byte(fmt.Sprintf("%s:%s:%s", rec.Collection, rec.Text, rec.UserPubAddress))
+		toSign2 := []byte(fmt.Sprintf("%s:%d:%s", rec.DataID, 1, rec.Text))
+		toSign3 := []byte(fmt.Sprintf("%s:create:%s", rec.DataID, rec.Text))
+		toSign4 := []byte(fmt.Sprintf("%s:%d:%s", rec.DataID, 1, textHash))
+		toSign5 := []byte(fmt.Sprintf("%s:%s:%s", rec.Collection, textHash, rec.UserPubAddress))
+		if !crypto.VerifyHybridSignature(toSign1, rec.UserPubAddress, rec.OwnerSignature) &&
+			!crypto.VerifyHybridSignature(toSign2, rec.UserPubAddress, rec.OwnerSignature) &&
+			!crypto.VerifyHybridSignature(toSign3, rec.UserPubAddress, rec.OwnerSignature) &&
+			!crypto.VerifyHybridSignature(toSign4, rec.UserPubAddress, rec.OwnerSignature) &&
+			!crypto.VerifyHybridSignature(toSign5, rec.UserPubAddress, rec.OwnerSignature) {
+			return nil, errors.New("unauthorized: invalid owner signature for record creation")
+		}
+	}
+
 	tree, err := crypto.BuildMerkleTree(chunkHashes)
 	if err == nil {
 		rec.MerkleRoot = tree.RootHex()
@@ -446,30 +462,30 @@ func (s *Store) UpdateRecord(dataID string, updaterPubKey string, signature stri
 			return nil, errors.New("unauthorized: missing cryptographic signature for record update")
 		}
 
+		textHash := crypto.HashBytes([]byte(newText))
 		toSign1 := []byte(fmt.Sprintf("%s:%d:%s", dataID, rec.Version+1, newText))
-		toSign2 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version+1))
-		toSign3 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version))
-		toSign4 := []byte(fmt.Sprintf("%s:%d", dataID, rec.Version+1))
+		toSign2 := []byte(fmt.Sprintf("%s:%d:%s", dataID, rec.Version+1, textHash))
+		toSign3 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version+1))
+		toSign4 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version))
 		toSign5 := []byte(fmt.Sprintf("%s:%s", dataID, newText))
-		toSign6 := []byte(fmt.Sprintf("%s:update", dataID))
 
 		valid := crypto.VerifyHybridSignature(toSign1, updaterPubKey, signature) ||
 			crypto.VerifyHybridSignature(toSign2, updaterPubKey, signature) ||
 			crypto.VerifyHybridSignature(toSign3, updaterPubKey, signature) ||
 			crypto.VerifyHybridSignature(toSign4, updaterPubKey, signature) ||
-			crypto.VerifyHybridSignature(toSign5, updaterPubKey, signature) ||
-			crypto.VerifyHybridSignature(toSign6, updaterPubKey, signature)
+			crypto.VerifyHybridSignature(toSign5, updaterPubKey, signature)
 
 		if !valid {
 			return nil, errors.New("unauthorized: invalid signature for record update")
 		}
 	} else if signature != "" {
+		textHash := crypto.HashBytes([]byte(newText))
 		toSign1 := []byte(fmt.Sprintf("%s:%d:%s", dataID, rec.Version+1, newText))
-		toSign4 := []byte(fmt.Sprintf("%s:%d", dataID, rec.Version+1))
-		toSign6 := []byte(fmt.Sprintf("%s:update", dataID))
+		toSign2 := []byte(fmt.Sprintf("%s:%d:%s", dataID, rec.Version+1, textHash))
+		toSign5 := []byte(fmt.Sprintf("%s:%s", dataID, newText))
 		valid := crypto.VerifyHybridSignature(toSign1, updaterPubKey, signature) ||
-			crypto.VerifyHybridSignature(toSign4, updaterPubKey, signature) ||
-			crypto.VerifyHybridSignature(toSign6, updaterPubKey, signature)
+			crypto.VerifyHybridSignature(toSign2, updaterPubKey, signature) ||
+			crypto.VerifyHybridSignature(toSign5, updaterPubKey, signature)
 		if !valid {
 			return nil, errors.New("unauthorized: invalid signature for record update")
 		}
@@ -1103,14 +1119,84 @@ func (s *Store) UpsertReplicatedRecord(rec *Record, fileData, picData []byte) (*
 
 	existing, exists := s.records[rec.DataID]
 	if exists {
+		// Security Check 1: Prevent ownership hijacking via replication
+		if existing.UserPubAddress != "" && rec.UserPubAddress != existing.UserPubAddress {
+			return nil, errors.New("security violation: cannot change owner of an existing record via replication")
+		}
+
 		if rec.Version < existing.Version {
 			return existing, nil
 		}
+		if rec.Version == existing.Version && existing.Text == rec.Text {
+			return existing, nil
+		}
+
+		// Security Check 2: If the existing record is owned, verify owner or editor signature on the incoming update
+		if existing.UserPubAddress != "" {
+			if rec.OwnerSignature == "" {
+				return nil, errors.New("unauthorized: replicated record update is missing required owner signature")
+			}
+
+			textHash := crypto.HashBytes([]byte(rec.Text))
+			toSign1 := []byte(fmt.Sprintf("%s:%d:%s", rec.DataID, rec.Version, rec.Text))
+			toSign2 := []byte(fmt.Sprintf("%s:%d:%s", rec.DataID, rec.Version, textHash))
+			toSign3 := []byte(fmt.Sprintf("%s:%d:%s", rec.DataID, rec.Version, rec.MerkleRoot))
+			toSign4 := []byte(fmt.Sprintf("%s:%s", rec.DataID, rec.Text))
+
+			valid := crypto.VerifyHybridSignature(toSign1, existing.UserPubAddress, rec.OwnerSignature) ||
+				crypto.VerifyHybridSignature(toSign2, existing.UserPubAddress, rec.OwnerSignature) ||
+				crypto.VerifyHybridSignature(toSign3, existing.UserPubAddress, rec.OwnerSignature) ||
+				crypto.VerifyHybridSignature(toSign4, existing.UserPubAddress, rec.OwnerSignature)
+
+			if !valid {
+				for _, acl := range existing.ACL {
+					if acl.Permission == PermEdit {
+						if crypto.VerifyHybridSignature(toSign1, acl.UserPubKey, rec.OwnerSignature) ||
+							crypto.VerifyHybridSignature(toSign2, acl.UserPubKey, rec.OwnerSignature) ||
+							crypto.VerifyHybridSignature(toSign3, acl.UserPubKey, rec.OwnerSignature) ||
+							crypto.VerifyHybridSignature(toSign4, acl.UserPubKey, rec.OwnerSignature) {
+							valid = true
+							break
+						}
+					}
+				}
+			}
+
+			if !valid {
+				return nil, errors.New("unauthorized: invalid owner signature for replicated record update")
+			}
+		}
+
 		if rec.FileChunkHash == "" && existing.FileChunkHash != "" {
 			rec.FileChunkHash = existing.FileChunkHash
 		}
 		if rec.PictureChunkHash == "" && existing.PictureChunkHash != "" {
 			rec.PictureChunkHash = existing.PictureChunkHash
+		}
+	} else {
+		// New record replicated from peer: if it has an owner, verify owner signature
+		if rec.UserPubAddress != "" {
+			if rec.OwnerSignature == "" {
+				return nil, errors.New("unauthorized: new replicated record is missing required owner signature")
+			}
+			textHash := crypto.HashBytes([]byte(rec.Text))
+			toSign1 := []byte(fmt.Sprintf("%s:%s:%s", rec.Collection, rec.Text, rec.UserPubAddress))
+			toSign2 := []byte(fmt.Sprintf("%s:%d:%s", rec.DataID, 1, rec.Text))
+			toSign3 := []byte(fmt.Sprintf("%s:create:%s", rec.DataID, rec.Text))
+			toSign4 := []byte(fmt.Sprintf("%s:%d:%s", rec.DataID, rec.Version, rec.Text))
+			toSign5 := []byte(fmt.Sprintf("%s:%d:%s", rec.DataID, rec.Version, textHash))
+			toSign6 := []byte(fmt.Sprintf("%s:%s", rec.DataID, rec.Text))
+
+			valid := crypto.VerifyHybridSignature(toSign1, rec.UserPubAddress, rec.OwnerSignature) ||
+				crypto.VerifyHybridSignature(toSign2, rec.UserPubAddress, rec.OwnerSignature) ||
+				crypto.VerifyHybridSignature(toSign3, rec.UserPubAddress, rec.OwnerSignature) ||
+				crypto.VerifyHybridSignature(toSign4, rec.UserPubAddress, rec.OwnerSignature) ||
+				crypto.VerifyHybridSignature(toSign5, rec.UserPubAddress, rec.OwnerSignature) ||
+				crypto.VerifyHybridSignature(toSign6, rec.UserPubAddress, rec.OwnerSignature)
+
+			if !valid {
+				return nil, errors.New("unauthorized: invalid owner signature for new replicated record")
+			}
 		}
 	}
 

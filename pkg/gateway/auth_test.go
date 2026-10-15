@@ -45,9 +45,12 @@ func TestNodeEditVerificationAndAccessControl(t *testing.T) {
 	// 1. Create Data Owner Identity (Ed25519)
 	ownerKP, _ := crypto.GenerateKeypair()
 
+	ownerCreateMsg := []byte(fmt.Sprintf("%s:%s:%s", "secure_docs", "Original confidential text v1", ownerKP.PublicKey))
+	ownerCreateSig, _ := crypto.SignPayload(ownerCreateMsg, ownerKP.PrivateKey)
 	createPayload, _ := json.Marshal(map[string]interface{}{
 		"collection":       "secure_docs",
 		"user_pub_address": ownerKP.PublicKey,
+		"signature":        ownerCreateSig,
 		"text":             "Original confidential text v1",
 	})
 
@@ -345,9 +348,12 @@ func TestEnsureCollectionAndBlacklist(t *testing.T) {
 	}
 
 	// 3. Blacklisted user attempts to create record -> 403 Forbidden!
+	badCreateMsg := []byte(fmt.Sprintf("%s:%s:%s", "chat_messages", "Abusive spam content", badUserKP.PublicKey))
+	badCreateSig, _ := crypto.SignPayload(badCreateMsg, badUserKP.PrivateKey)
 	badCreateBody, _ := json.Marshal(map[string]interface{}{
 		"collection":       "chat_messages",
 		"user_pub_address": badUserKP.PublicKey,
+		"signature":        badCreateSig,
 		"text":             "Abusive spam content",
 	})
 	req = httptest.NewRequest("POST", "/api/records", bytes.NewReader(badCreateBody))

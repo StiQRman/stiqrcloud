@@ -47,6 +47,7 @@ type Server struct {
 	standalone  bool
 	mux         *http.ServeMux
 	reconciling atomic.Bool
+	rateLimiter *IPRateLimiter
 }
 
 // Config holds gateway server options.
@@ -104,6 +105,7 @@ func NewServer(cfg Config) *Server {
 		isPublic:    cfg.IsPublic,
 		standalone:  cfg.Standalone,
 		mux:         http.NewServeMux(),
+		rateLimiter: NewIPRateLimiter(120, 30, time.Minute),
 	}
 
 	// Wire contract checker for expired/unpaid data eviction
@@ -466,6 +468,12 @@ func (s *Server) handleInternalStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := ExtractIP(r)
+	if s.rateLimiter != nil && !s.rateLimiter.AllowWrite(ip) {
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -501,7 +509,11 @@ func (s *Server) handleInternalStore(w http.ResponseWriter, r *http.Request) {
 
 	stored, err := s.store.UpsertReplicatedRecord(rec, fileData, picData)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to store replicated record: %v", err), http.StatusInternalServerError)
+		if strings.Contains(strings.ToLower(err.Error()), "unauthorized") || strings.Contains(strings.ToLower(err.Error()), "security violation") {
+			http.Error(w, fmt.Sprintf("Forbidden: %v", err), http.StatusForbidden)
+		} else {
+			http.Error(w, fmt.Sprintf("failed to store replicated record: %v", err), http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -876,8 +888,33 @@ func (s *Server) ReconcileAndReplicateAll() int {
 func (s *Server) handleRecordsRoot(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		ip := ExtractIP(r)
+		if s.rateLimiter != nil && !s.rateLimiter.AllowRead(ip) {
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+
 		collection := r.URL.Query().Get("collection")
+		userPubKey := r.URL.Query().Get("user_pub_address")
+
+		// Restrict indiscriminate global dump across all collections on public WAN
+		if collection == "" && userPubKey == "" && s.isPublic && !s.isLocalRequest(r) {
+			http.Error(w, "Forbidden: global database dump across all collections is restricted on public network. Specify a collection or user_pub_address.", http.StatusForbidden)
+			return
+		}
+
 		records, total := s.store.ListRecords(collection, 50, 0)
+		if userPubKey != "" {
+			var filtered []*storage.Record
+			for _, rec := range records {
+				if rec.UserPubAddress == userPubKey {
+					filtered = append(filtered, rec)
+				}
+			}
+			records = filtered
+			total = len(filtered)
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"records": records,
@@ -893,6 +930,12 @@ func (s *Server) handleRecordsRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
+	ip := ExtractIP(r)
+	if s.rateLimiter != nil && !s.rateLimiter.AllowWrite(ip) {
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 	// Parse multipart or JSON
 	var text, userPubKey, sig, collection, dataID, repPolicy string
@@ -965,6 +1008,33 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 	if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(userPubKey) {
 		http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
 		return
+	}
+
+	// Security: Require cryptographic proof-of-possession signature when creating a record claiming an owner public key
+	if userPubKey != "" {
+		if sig == "" {
+			http.Error(w, "unauthorized: missing required owner signature for user_pub_address", http.StatusBadRequest)
+			return
+		}
+		textHash := crypto.HashBytes([]byte(text))
+		toSign1 := []byte(fmt.Sprintf("%s:%s:%s", collection, text, userPubKey))
+		toSign2 := []byte(fmt.Sprintf("%s:%d:%s", dataID, 1, text))
+		toSign3 := []byte(fmt.Sprintf("%s:create:%s", dataID, text))
+		toSign4 := []byte(fmt.Sprintf("%s:%d:%s", dataID, 1, textHash))
+		toSign5 := []byte(fmt.Sprintf("%s:%s:%s", collection, textHash, userPubKey))
+		toSign6 := []byte(fmt.Sprintf("%s:%s", dataID, text))
+
+		valid := crypto.VerifyHybridSignature(toSign1, userPubKey, sig) ||
+			crypto.VerifyHybridSignature(toSign2, userPubKey, sig) ||
+			crypto.VerifyHybridSignature(toSign3, userPubKey, sig) ||
+			crypto.VerifyHybridSignature(toSign4, userPubKey, sig) ||
+			crypto.VerifyHybridSignature(toSign5, userPubKey, sig) ||
+			crypto.VerifyHybridSignature(toSign6, userPubKey, sig)
+
+		if !valid {
+			http.Error(w, "unauthorized: invalid owner signature for record creation", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	rec := &storage.Record{
@@ -1415,6 +1485,32 @@ func (s *Server) handleCreatePBRecord(w http.ResponseWriter, r *http.Request, co
 			}
 		}
 
+		if userPubKey != "" {
+			if sig == "" {
+				http.Error(w, "unauthorized: missing required owner signature for user_pub_address", http.StatusBadRequest)
+				return
+			}
+			textHash := crypto.HashBytes([]byte(text))
+			toSign1 := []byte(fmt.Sprintf("%s:%s:%s", collection, text, userPubKey))
+			toSign2 := []byte(fmt.Sprintf("%s:%d:%s", dataID, 1, text))
+			toSign3 := []byte(fmt.Sprintf("%s:create:%s", dataID, text))
+			toSign4 := []byte(fmt.Sprintf("%s:%d:%s", dataID, 1, textHash))
+			toSign5 := []byte(fmt.Sprintf("%s:%s:%s", collection, textHash, userPubKey))
+			toSign6 := []byte(fmt.Sprintf("%s:%s", dataID, text))
+
+			valid := crypto.VerifyHybridSignature(toSign1, userPubKey, sig) ||
+				crypto.VerifyHybridSignature(toSign2, userPubKey, sig) ||
+				crypto.VerifyHybridSignature(toSign3, userPubKey, sig) ||
+				crypto.VerifyHybridSignature(toSign4, userPubKey, sig) ||
+				crypto.VerifyHybridSignature(toSign5, userPubKey, sig) ||
+				crypto.VerifyHybridSignature(toSign6, userPubKey, sig)
+
+			if !valid {
+				http.Error(w, "unauthorized: invalid owner signature for record creation", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		rec := &storage.Record{
 			DataID:            dataID,
 			Collection:        collection,
@@ -1453,6 +1549,19 @@ func (s *Server) handleCreatePBRecord(w http.ResponseWriter, r *http.Request, co
 
 // PocketBase compatibility endpoints: /api/collections/:col/records[/:id] and /api/collections/users/...
 func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
+	ip := ExtractIP(r)
+	if r.Method == http.MethodGet {
+		if s.rateLimiter != nil && !s.rateLimiter.AllowRead(ip) {
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+	} else {
+		if s.rateLimiter != nil && !s.rateLimiter.AllowWrite(ip) {
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+	}
+
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	// e.g. ["api", "collections", ":col", "records", optional ":id"]
 	// or ["api", "collections", "users", "auth-with-password"]
@@ -1460,10 +1569,14 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 	if len(parts) >= 3 && parts[1] == "collections" {
 		col := parts[2]
 
-		// Mock Auth for PocketBase client apps
+		// Mock Auth for PocketBase client apps: disabled on public WAN to prevent false assurance
 		if col == "users" && len(parts) >= 4 {
 			sub := parts[3]
 			if sub == "auth-with-password" || sub == "auth-with-oauth2" {
+				if s.isPublic && !s.isLocalRequest(r) {
+					http.Error(w, "unauthorized: password-based mock authentication is disabled on public network. StiQRcloud enforces Ed25519 cryptographic keypairs.", http.StatusUnauthorized)
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"token": "stiqrcloud_mock_jwt_token",
@@ -2455,6 +2568,24 @@ else
   echo "Error: curl or wget is required to download the binary."
   exit 1
 fi
+
+echo "-> Verifying binary SHA256 integrity..."
+if command -v sha256sum >/dev/null 2>&1; then
+  if curl -sSLf "%s/download/checksums.txt" -o "$DEST_DIR/checksums.txt" 2>/dev/null; then
+    EXPECTED_HASH=$(grep "$BIN_FILE" "$DEST_DIR/checksums.txt" | awk '{print $1}')
+    if [ -n "$EXPECTED_HASH" ]; then
+      ACTUAL_HASH=$(sha256sum "$TARGET_BIN" | awk '{print $1}')
+      if [ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]; then
+        echo "Error: SHA256 checksum mismatch!"
+        echo "Expected: $EXPECTED_HASH"
+        echo "Got:      $ACTUAL_HASH"
+        exit 1
+      fi
+      echo "-> SHA256 integrity verified ($ACTUAL_HASH)."
+    fi
+  fi
+fi
+
 chmod +x "$TARGET_BIN"
 
 # Automatically find available ports to prevent conflicts
@@ -2486,7 +2617,7 @@ exec "$TARGET_BIN" \
   -peers "$DISCOVERY_URL" \
   -data-dir "$DEST_DIR/data" \
   -name "$NODE_NAME"
-`, baseURL, baseURL, baseURL, baseURL, baseURL, baseURL, baseURL)
+`, baseURL, baseURL, baseURL, baseURL, baseURL, baseURL, baseURL, baseURL)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)

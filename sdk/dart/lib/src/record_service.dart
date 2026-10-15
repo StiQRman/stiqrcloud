@@ -78,7 +78,20 @@ class RecordService {
     }
 
     final pubAddr = await _client.publicAddress ?? '';
-    body['user_pub_address'] = pubAddr;
+    if (pubAddr.isNotEmpty) {
+      body['user_pub_address'] = pubAddr;
+      if (_client.keyPair != null) {
+        String createText = (body['text'] ?? body['content'] ?? '') as String;
+        if (createText.isEmpty) {
+          final copy = Map<String, dynamic>.from(body)..remove('user_pub_address')..remove('signature');
+          createText = jsonEncode(copy);
+          body['text'] = createText;
+        }
+        final signPayload = utf8.encode('$collectionName:$createText:$pubAddr');
+        final sig = await StiQRcloudCrypto.sign(signPayload, _client.keyPair!);
+        body['signature'] = sig;
+      }
+    }
 
     final uri = Uri.parse('$endpoint/api/collections/${Uri.encodeComponent(collectionName)}/records');
 
@@ -184,7 +197,13 @@ class RecordService {
       body['updater_pub_key'] = pubAddr;
 
       if (_client.keyPair != null) {
-        final signBytes = utf8.encode('$id:update');
+        String updateText = (body['text'] ?? body['content'] ?? '') as String;
+        if (updateText.isEmpty) {
+          final copy = Map<String, dynamic>.from(body)..remove('updater_pub_key')..remove('signature');
+          updateText = jsonEncode(copy);
+          body['text'] = updateText;
+        }
+        final signBytes = utf8.encode('$id:$updateText');
         final sig = await StiQRcloudCrypto.sign(signBytes, _client.keyPair!);
         headers['X-User-Signature'] = sig;
         body['signature'] = sig;

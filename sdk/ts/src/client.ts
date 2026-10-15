@@ -433,7 +433,13 @@ export class StiQRcloudClient {
           body.updater_pub_key = client.publicAddress;
 
           if (client.keyPair) {
-            const signBytes = new TextEncoder().encode(`${id}:update`);
+            let updateText = body.text || body.content || '';
+            if (!updateText) {
+              const { updater_pub_key, signature, ...rest } = body;
+              updateText = JSON.stringify(rest);
+              body.text = updateText;
+            }
+            const signBytes = new TextEncoder().encode(`${id}:${updateText}`);
             const sig = await StiQRcloudCrypto.sign(signBytes, client.keyPair.privateKey);
             headers['X-User-Signature'] = sig;
             body.signature = sig;

@@ -56,7 +56,9 @@ func TestGatewayAPIEndpointsAndInvariantDataID(t *testing.T) {
 
 	// 2. Create Record
 	aliceKP, _ := crypto.GenerateKeypair()
-	payload := fmt.Sprintf(`{"collection":"notes","user_pub_address":%q,"text":"Hello stiqrcloud database"}`, aliceKP.PublicKey)
+	text1 := "Hello stiqrcloud database"
+	sigCreate, _ := crypto.SignPayload([]byte(fmt.Sprintf("%s:%s:%s", "notes", text1, aliceKP.PublicKey)), aliceKP.PrivateKey)
+	payload := fmt.Sprintf(`{"collection":"notes","user_pub_address":%q,"signature":%q,"text":%q}`, aliceKP.PublicKey, sigCreate, text1)
 	req = httptest.NewRequest("POST", "/api/records", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
@@ -132,10 +134,14 @@ func TestEdgeNodeNATPullSync(t *testing.T) {
 
 	// 2. Add record with chunk to Gateway
 	chunkContent := []byte("hello decentralized storage chunk from pi gateway")
+	ownerKP, _ := crypto.GenerateKeypair()
+	textPhoto := "Encrypted metadata text"
+	sigPhoto, _ := crypto.SignPayload([]byte(fmt.Sprintf("%s:%s:%s", "family_photos", textPhoto, ownerKP.PublicKey)), ownerKP.PrivateKey)
 	rec, err := serverStore.CreateRecord(&storage.Record{
 		Collection:     "family_photos",
-		UserPubAddress: "ed25519_owner_key",
-		Text:           "Encrypted metadata text",
+		UserPubAddress: ownerKP.PublicKey,
+		OwnerSignature: sigPhoto,
+		Text:           textPhoto,
 		FileName:       "photo.raw",
 		TotalBytes:     int64(len(chunkContent)),
 	}, chunkContent, nil)
