@@ -95,3 +95,107 @@ func TestUniversalDataIDRouting(t *testing.T) {
 		t.Fatalf("Unexpected resolved record data: %+v", rec)
 	}
 }
+
+func TestSelectQuorumForUserAffinityAndAdaptation(t *testing.T) {
+	tempDir, _ := os.MkdirTemp("", "testcloud_affinity_*")
+	defer os.RemoveAll(tempDir)
+	store, _ := storage.NewStore(tempDir)
+
+	swarm := NewSwarm("local_auditor", "http://127.0.0.1:8100", store)
+
+	// Register 8 mock peers
+	for i := 1; i <= 8; i++ {
+		p := &Peer{
+			NodeID:          fmt.Sprintf("peer_%d", i),
+			PublicAddr:      fmt.Sprintf("http://127.0.0.1:810%d", i),
+			IsPublic:        true,
+			IsOnline:        true,
+			PricePerGBMonth: 100,
+			SocialScore:     80.0,
+			LastSeen:        time.Now(),
+		}
+		swarm.RegisterPeer(p)
+	}
+
+	userAlice := "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	userBob := "03bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	// 1. Conservative Bias: Verify Alice's storage nodes are 100% deterministic and sticky across multiple calls
+	_, storage1, err := swarm.SelectQuorumForUser(userAlice, 3, 3)
+	if err != nil {
+		t.Fatalf("SelectQuorumForUser failed: %v", err)
+	}
+	if len(storage1) != 3 {
+		t.Fatalf("Expected 3 storage nodes, got %d", len(storage1))
+	}
+
+	for i := 0; i < 20; i++ {
+		_, storageRetry, err := swarm.SelectQuorumForUser(userAlice, 3, 3)
+		if err != nil {
+			t.Fatalf("SelectQuorumForUser iteration %d failed: %v", i, err)
+		}
+		for j := range storage1 {
+			if storageRetry[j] != storage1[j] {
+				t.Fatalf("Sticky affinity violated: run %d got %v, expected %v", i, storageRetry, storage1)
+			}
+		}
+	}
+
+	// 2. Different user gets a deterministic pod
+	_, storageBob, err := swarm.SelectQuorumForUser(userBob, 3, 3)
+	if err != nil {
+		t.Fatalf("SelectQuorumForUser Bob failed: %v", err)
+	}
+	if len(storageBob) != 3 {
+		t.Fatalf("Expected 3 storage nodes for Bob, got %d", len(storageBob))
+	}
+
+	// 3. Fast Adaptation: Take one of Alice's storage nodes offline
+	failedNode := storage1[0]
+	p, ok := swarm.GetPeer(failedNode)
+	if !ok {
+		t.Fatalf("Failed to get peer %s", failedNode)
+	}
+	p.IsOnline = false
+
+	_, storageAdapted, err := swarm.SelectQuorumForUser(userAlice, 3, 3)
+	if err != nil {
+		t.Fatalf("Adaptation call failed: %v", err)
+	}
+
+	// Verify failed node was immediately evicted
+	for _, node := range storageAdapted {
+		if node == failedNode {
+			t.Fatalf("Failed node %s still present in adapted storage nodes: %v", failedNode, storageAdapted)
+		}
+	}
+
+	// Verify the remaining 2 healthy affinity nodes were retained
+	retainedCount := 0
+	for _, node := range storageAdapted {
+		if node == storage1[1] || node == storage1[2] {
+			retainedCount++
+		}
+	}
+	if retainedCount != 2 {
+		t.Fatalf("Expected the 2 surviving affinity nodes to be preserved, got %v", storageAdapted)
+	}
+
+	// 4. Recovery: Bring node back online
+	p.IsOnline = true
+	p.LastSeen = time.Now()
+	_, storageRecovered, err := swarm.SelectQuorumForUser(userAlice, 3, 3)
+	if err != nil {
+		t.Fatalf("Recovery call failed: %v", err)
+	}
+	foundRecovered := false
+	for _, node := range storageRecovered {
+		if node == failedNode {
+			foundRecovered = true
+			break
+		}
+	}
+	if !foundRecovered {
+		t.Fatalf("Expected recovered node %s to resume affinity spot, got %v", failedNode, storageRecovered)
+	}
+}

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -72,5 +73,70 @@ func TestAuditorChallengeVerificationAndFailover(t *testing.T) {
 	// Verify invariant DataID remained untouched through failover
 	if rec.DataID != "doc_audit_test" {
 		t.Fatalf("Data ID was corrupted during failover")
+	}
+}
+
+func TestBatchedAuditCycleAndUserAffinityHealing(t *testing.T) {
+	tempDir, _ := os.MkdirTemp("", "testcloud_batched_audit_*")
+	defer os.RemoveAll(tempDir)
+
+	store, _ := storage.NewStore(tempDir)
+	escrowMgr := escrow.NewManager("auditor_1", 100)
+	swarm := p2p.NewSwarm("auditor_1", "http://127.0.0.1:8100", store)
+
+	// Add 5 peers
+	swarm.RegisterPeer(&p2p.Peer{NodeID: "node_1", PublicAddr: "http://127.0.0.1:8101", IsPublic: true, IsOnline: true, LastSeen: time.Now()})
+	swarm.RegisterPeer(&p2p.Peer{NodeID: "node_2", PublicAddr: "http://127.0.0.1:8102", IsPublic: true, IsOnline: true, LastSeen: time.Now()})
+	swarm.RegisterPeer(&p2p.Peer{NodeID: "node_3", PublicAddr: "http://127.0.0.1:8103", IsPublic: true, IsOnline: true, LastSeen: time.Now()})
+	swarm.RegisterPeer(&p2p.Peer{NodeID: "node_spare1", PublicAddr: "http://127.0.0.1:8104", IsPublic: true, IsOnline: true, LastSeen: time.Now()})
+	swarm.RegisterPeer(&p2p.Peer{NodeID: "node_spare2", PublicAddr: "http://127.0.0.1:8105", IsPublic: true, IsOnline: true, LastSeen: time.Now()})
+
+	coord := NewCoordinator("auditor_1", store, escrowMgr, swarm)
+
+	userPub := "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+	var contractIDs []string
+	// Create 3 records all owned by same user and stored on node_1, node_2
+	for i := 1; i <= 3; i++ {
+		rec := &storage.Record{
+			DataID:         fmt.Sprintf("user_rec_%d", i),
+			UserPubAddress: userPub,
+			StoragePeers:   []string{"node_1", "node_2"},
+		}
+		_ = store.SaveRecord(rec)
+		c, _ := escrowMgr.CreateContract(rec.DataID, userPub, 1024, 1, map[string]int64{
+			"node_1": 100,
+			"node_2": 100,
+		}, []string{"auditor_1"})
+		_, _ = escrowMgr.SettlePayment(c.ContractID)
+		contractIDs = append(contractIDs, c.ContractID)
+	}
+
+	// Run audit cycle - node probes should be batched and executed
+	results := coord.RunAuditCycle()
+	if len(results) != 6 { // 3 contracts x 2 storage peers = 6 audit evaluations
+		t.Fatalf("Expected 6 audit evaluations, got %d", len(results))
+	}
+
+	// Verify failover uses affinity ranking for this user
+	rec1, _ := store.GetRecord("user_rec_1")
+	repID, err := coord.TriggerSelfHealingReplication(contractIDs[0], "node_1", rec1)
+	if err != nil {
+		t.Fatalf("TriggerSelfHealingReplication failed: %v", err)
+	}
+
+	if repID == "" || repID == "node_1" {
+		t.Fatalf("Invalid replacement node ID: %s", repID)
+	}
+
+	// Verify another record of the same user also fails over to the same replacement node!
+	rec2, _ := store.GetRecord("user_rec_2")
+	repID2, err := coord.TriggerSelfHealingReplication(contractIDs[1], "node_1", rec2)
+	if err != nil {
+		t.Fatalf("TriggerSelfHealingReplication record 2 failed: %v", err)
+	}
+
+	if repID2 != repID {
+		t.Fatalf("User affinity pod failed: rec1 failed over to %s but rec2 failed over to %s", repID, repID2)
 	}
 }

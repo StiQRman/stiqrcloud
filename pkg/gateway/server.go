@@ -706,14 +706,14 @@ func (s *Server) replicateAndEngageQuorum(rec *storage.Record, fileBytes, picByt
 	// 2. Custom storage peers explicitly chosen by user
 	if len(rec.StoragePeers) > 0 && (rec.ReplicationPolicy == "custom" || rec.ReplicationPolicy == "") {
 		if len(rec.AuditorPeers) < 3 {
-			auditors, _, qErr := s.swarm.SelectQuorum()
+			auditors, _, qErr := s.swarm.SelectQuorumForUser(rec.UserPubAddress, 3, 0)
 			if qErr == nil {
 				rec.AuditorPeers = auditors
 				_ = s.store.SaveRecord(rec)
 			}
 		}
 	} else if rec.ReplicationPolicy == "replicated_2" || rec.ReplicationPolicy == "distributed_2" || rec.TargetReplicas == 2 {
-		// 3. User requested replication to 2 storage peers
+		// 3. User requested replication to 2 storage peers (biased to user affinity pod)
 		peersOnline := 0
 		hasAutoNode := false
 		if len(rec.StoragePeers) > 0 {
@@ -728,7 +728,7 @@ func (s *Server) replicateAndEngageQuorum(rec *storage.Record, fileBytes, picByt
 			}
 		}
 		if hasAutoNode || peersOnline < 1 || len(rec.StoragePeers) < 2 {
-			auditors, storageNodes, qErr := s.swarm.SelectQuorumWithCounts(3, 2)
+			auditors, storageNodes, qErr := s.swarm.SelectQuorumForUser(rec.UserPubAddress, 3, 2)
 			if qErr == nil {
 				rec.AuditorPeers = auditors
 				rec.StoragePeers = storageNodes
@@ -736,7 +736,7 @@ func (s *Server) replicateAndEngageQuorum(rec *storage.Record, fileBytes, picByt
 			}
 		}
 	} else {
-		// 4. Default 3-node mesh quorum
+		// 4. Default 3-node mesh quorum (biased to user affinity pod)
 		peersOnline := 0
 		hasAutoNode := false
 		if len(rec.StoragePeers) > 0 {
@@ -752,7 +752,7 @@ func (s *Server) replicateAndEngageQuorum(rec *storage.Record, fileBytes, picByt
 		}
 
 		if hasAutoNode || peersOnline < 2 || len(rec.StoragePeers) < 3 {
-			auditors, storageNodes, qErr := s.swarm.SelectQuorum()
+			auditors, storageNodes, qErr := s.swarm.SelectQuorumForUser(rec.UserPubAddress, 3, 3)
 			if qErr == nil {
 				rec.AuditorPeers = auditors
 				rec.StoragePeers = storageNodes
@@ -824,7 +824,7 @@ func (s *Server) ReconcileAndReplicateAll() int {
 		}
 
 		if needsQuorum {
-			auditors, storageNodes, qErr := s.swarm.SelectQuorum()
+			auditors, storageNodes, qErr := s.swarm.SelectQuorumForUser(rec.UserPubAddress, 3, 3)
 			if qErr == nil {
 				rec.AuditorPeers = auditors
 				rec.StoragePeers = storageNodes

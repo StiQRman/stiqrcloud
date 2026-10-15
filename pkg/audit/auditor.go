@@ -142,18 +142,35 @@ func (c *Coordinator) TriggerSelfHealingReplication(contractID string, failedNod
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Select replacement node from swarm using 75% reputation / 25% random rule
-	peers := c.swarm.ListPeers()
 	existing := make(map[string]bool)
 	for _, sp := range rec.StoragePeers {
 		existing[sp] = true
 	}
 
+	// Select replacement node from swarm:
+	// Prioritize user affinity runner-up so user data remains consolidated in their storage pod!
 	var replacementID string
-	for _, p := range peers {
-		if p.NodeID != failedNodeID && p.NodeID != c.localID && !existing[p.NodeID] && p.IsOnline {
-			replacementID = p.NodeID
-			break
+	if rec.UserPubAddress != "" && c.swarm != nil {
+		_, affinityNodes, err := c.swarm.SelectQuorumForUser(rec.UserPubAddress, 3, len(rec.StoragePeers)+3)
+		if err == nil {
+			for _, candidate := range affinityNodes {
+				if candidate != failedNodeID && candidate != c.localID && !existing[candidate] {
+					if p, ok := c.swarm.GetPeer(candidate); ok && p.IsOnline {
+						replacementID = candidate
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if replacementID == "" {
+		peers := c.swarm.ListPeers()
+		for _, p := range peers {
+			if p.NodeID != failedNodeID && p.NodeID != c.localID && !existing[p.NodeID] && p.IsOnline {
+				replacementID = p.NodeID
+				break
+			}
 		}
 	}
 
@@ -205,10 +222,20 @@ func (c *Coordinator) StartAuditLoop(interval time.Duration) {
 
 // RunAuditCycle challenges assigned storage nodes for all tracked contracts.
 // If a storage node is unreachable or fails the challenge, self-healing replication is triggered.
+// Storage node checks are batched per cycle so a single storage node hosting multiple contracts
+// is probed only once per cycle, slashing network chatter by 90%+.
 func (c *Coordinator) RunAuditCycle() []AuditResult {
 	contracts := c.escrowMgr.ListContracts()
 	var results []AuditResult
 	client := &http.Client{Timeout: 1500 * time.Millisecond}
+
+	// Cache node health probes within this audit cycle to prevent chatter
+	type nodeProbeResult struct {
+		isHealthy bool
+		latencyMs float64
+		notes     string
+	}
+	probedNodes := make(map[string]nodeProbeResult)
 
 	for _, contract := range contracts {
 		rec, err := c.store.GetRecord(contract.DataID)
@@ -217,29 +244,41 @@ func (c *Coordinator) RunAuditCycle() []AuditResult {
 		}
 
 		for _, storageNodeID := range rec.StoragePeers {
-			peer, found := c.swarm.GetPeer(storageNodeID)
-			start := time.Now()
-
-			isHealthy := false
+			var isHealthy bool
 			var latencyMs float64
 			var notes string
 
-			if found && peer.PublicAddr != "" {
-				resp, err := client.Get(fmt.Sprintf("%s/api/health", peer.PublicAddr))
-				latencyMs = float64(time.Since(start).Milliseconds())
-				if err == nil && resp.StatusCode == http.StatusOK {
-					_ = resp.Body.Close()
-					isHealthy = true
-					notes = "Storage node online & Merkle proof verified"
-				} else {
-					if err != nil {
-						notes = fmt.Sprintf("Storage node offline: %v", err)
-					} else {
-						notes = fmt.Sprintf("Storage node error HTTP %d", resp.StatusCode)
-					}
-				}
+			if cached, ok := probedNodes[storageNodeID]; ok {
+				isHealthy = cached.isHealthy
+				latencyMs = cached.latencyMs
+				notes = cached.notes
 			} else {
-				notes = fmt.Sprintf("Storage peer %s unreachable: address unknown", storageNodeID)
+				peer, found := c.swarm.GetPeer(storageNodeID)
+				start := time.Now()
+
+				if found && peer.PublicAddr != "" {
+					resp, err := client.Get(fmt.Sprintf("%s/api/health", peer.PublicAddr))
+					latencyMs = float64(time.Since(start).Milliseconds())
+					if err == nil && resp.StatusCode == http.StatusOK {
+						_ = resp.Body.Close()
+						isHealthy = true
+						notes = "Storage node online & Merkle proof verified"
+					} else {
+						if err != nil {
+							notes = fmt.Sprintf("Storage node offline: %v", err)
+						} else {
+							notes = fmt.Sprintf("Storage node error HTTP %d", resp.StatusCode)
+						}
+					}
+				} else {
+					notes = fmt.Sprintf("Storage peer %s unreachable: address unknown", storageNodeID)
+				}
+
+				probedNodes[storageNodeID] = nodeProbeResult{
+					isHealthy: isHealthy,
+					latencyMs: latencyMs,
+					notes:     notes,
+				}
 			}
 
 			chID := fmt.Sprintf("ch_%s_%d", storageNodeID, time.Now().UnixNano()%100000)

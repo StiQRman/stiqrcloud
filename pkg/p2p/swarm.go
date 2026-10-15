@@ -2,6 +2,8 @@ package p2p
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +33,7 @@ type Peer struct {
 	AuditsPerformed int64     `json:"audits_performed"`
 	AvgLatencyMs    float64   `json:"avg_latency_ms"`
 	LastSeen        time.Time `json:"last_seen"`
+	LastProbed      time.Time `json:"last_probed,omitempty"`
 	SocialScore     float64   `json:"social_score"`
 }
 
@@ -312,12 +315,11 @@ func (s *Swarm) RegisterPeer(p *Peer) {
 	}
 
 	// For a new peer learned passively via gossip:
-	// If it has an address, mark offline until ProbePeers verifies reachability directly.
-	// If it has no address, only online if LastSeen is very recent.
-	if p.PublicAddr != "" {
-		p.IsOnline = false
-	} else {
-		p.IsOnline = time.Since(p.LastSeen) <= 15*time.Second
+	// If it has an address and IsOnline was not explicitly asserted, mark offline until ProbePeers verifies reachability directly.
+	if !p.IsOnline {
+		if p.PublicAddr == "" {
+			p.IsOnline = time.Since(p.LastSeen) <= 15*time.Second
+		}
 	}
 	s.calculateSocialScore(p)
 	s.peers[p.NodeID] = p
@@ -466,6 +468,155 @@ func (s *Swarm) SelectQuorumWithCounts(nAuditors, nStorage int) (auditors []stri
 
 	if len(auditors) < nAuditors || len(storageNodes) < nStorage {
 		return nil, nil, errors.New("insufficient active peers to form requested quorum")
+	}
+
+	return auditors, storageNodes, nil
+}
+
+// SelectQuorumForUser deterministically selects storage nodes using Rendezvous Hashing (HRW)
+// biased 70% toward consistent user affinity (Storage Pods) to minimize network chatter and audits,
+// while dynamically adapting (30% weight + online/latency gating) to immediately route around offline or lagging nodes.
+func (s *Swarm) SelectQuorumForUser(userPubAddress string, nAuditors, nStorage int) (auditors []string, storageNodes []string, err error) {
+	if userPubAddress == "" {
+		return s.SelectQuorumWithCounts(nAuditors, nStorage)
+	}
+	if nAuditors <= 0 {
+		nAuditors = 3
+	}
+	if nStorage <= 0 {
+		nStorage = 3
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var eligible []*Peer
+	for id, p := range s.peers {
+		if id != s.localID && p.IsOnline && time.Since(p.LastSeen) < 15*time.Minute {
+			eligible = append(eligible, p)
+		}
+	}
+
+	if len(eligible) == 0 {
+		return s.fallbackQuorumCounts(eligible, nAuditors, nStorage)
+	}
+
+	// 1st Auditor is this local gateway node
+	auditors = append(auditors, s.localID)
+
+	// Score all eligible peers for this user using Rendezvous Hashing with health/latency weighting
+	type peerScore struct {
+		peer  *Peer
+		score float64
+	}
+
+	scores := make([]peerScore, len(eligible))
+	for i, p := range eligible {
+		// Deterministic affinity hash: SHA256(userPubAddress + ":" + peerNodeID)
+		hashBytes := sha256.Sum256([]byte(fmt.Sprintf("%s:%s", userPubAddress, p.NodeID)))
+		hashVal := float64(binary.BigEndian.Uint64(hashBytes[:8])) / float64(^uint64(0))
+
+		// Dynamic health & reputation factor (0.1 to 1.0)
+		normScore := p.SocialScore / 100.0
+		if normScore > 1.0 {
+			normScore = 1.0
+		} else if normScore < 0.1 {
+			normScore = 0.1
+		}
+
+		// Latency penalty if node is slow (> 250ms)
+		latencyPenalty := 1.0
+		if p.AvgLatencyMs > 250 {
+			latencyPenalty = 250.0 / p.AvgLatencyMs
+			if latencyPenalty < 0.1 {
+				latencyPenalty = 0.1
+			}
+		}
+
+		// 70% Conservative Affinity Bias (Sticky Storage Pods kill chatter)
+		// 30% Dynamic Health & Reputation (Adapts immediately if node degrades)
+		compositeScore := ((0.70 * hashVal) + (0.30 * normScore)) * latencyPenalty
+		scores[i] = peerScore{peer: p, score: compositeScore}
+	}
+
+	// Sort descending by score
+	sort.Slice(scores, func(i, j int) bool {
+		return scores[i].score > scores[j].score
+	})
+
+	// The top nStorage peers become the sticky storage nodes
+	assignedStorage := make(map[string]bool)
+	for _, sc := range scores {
+		if len(storageNodes) < nStorage {
+			storageNodes = append(storageNodes, sc.peer.NodeID)
+			assignedStorage[sc.peer.NodeID] = true
+		} else {
+			break
+		}
+	}
+
+	// Co-auditors rotate per weekly epoch to prevent auditor-storage collusion:
+	// Salt hash with current epoch week
+	epochWeek := time.Now().Unix() / (7 * 86400)
+	type auditorCandidate struct {
+		peer  *Peer
+		score float64
+	}
+	var auditorPool []auditorCandidate
+	for _, sc := range scores {
+		if !assignedStorage[sc.peer.NodeID] {
+			auditHashBytes := sha256.Sum256([]byte(fmt.Sprintf("%s:%s:epoch_%d", userPubAddress, sc.peer.NodeID, epochWeek)))
+			auditHashVal := float64(binary.BigEndian.Uint64(auditHashBytes[:8])) / float64(^uint64(0))
+			auditorPool = append(auditorPool, auditorCandidate{peer: sc.peer, score: auditHashVal})
+		}
+	}
+
+	sort.Slice(auditorPool, func(i, j int) bool {
+		return auditorPool[i].score > auditorPool[j].score
+	})
+
+	for _, ac := range auditorPool {
+		if len(auditors) < nAuditors {
+			auditors = append(auditors, ac.peer.NodeID)
+		} else {
+			break
+		}
+	}
+
+	// Fallback if not enough non-storage peers available for co-auditors
+	for _, sc := range scores {
+		if len(auditors) >= nAuditors {
+			break
+		}
+		alreadyAuditor := false
+		for _, a := range auditors {
+			if a == sc.peer.NodeID {
+				alreadyAuditor = true
+				break
+			}
+		}
+		if !alreadyAuditor {
+			auditors = append(auditors, sc.peer.NodeID)
+		}
+	}
+
+	// Pad missing storage nodes or auditors deterministically if peer count is smaller than requested
+	padIdx := 1
+	for len(storageNodes) < nStorage {
+		if len(eligible) > 0 {
+			storageNodes = append(storageNodes, eligible[(padIdx-1)%len(eligible)].NodeID)
+		} else {
+			storageNodes = append(storageNodes, fmt.Sprintf("node_storage_auto_%d", padIdx))
+		}
+		padIdx++
+	}
+	for len(auditors) < nAuditors {
+		if len(eligible) > 0 {
+			auditors = append(auditors, eligible[(padIdx-1)%len(eligible)].NodeID)
+		} else {
+			auditors = append(auditors, fmt.Sprintf("node_auditor_auto_%d", padIdx))
+		}
+		padIdx++
 	}
 
 	return auditors, storageNodes, nil
@@ -890,6 +1041,14 @@ func (s *Swarm) ProbePeers() {
 			continue
 		}
 
+		// Adaptive Gossip Decay:
+		// If a node is stable, online, and has high social score (>= 70),
+		// back off probing to once every 45 seconds to kill idle chatter.
+		// If a node is offline, degraded, newly registered, or overdue, probe immediately!
+		if p.IsOnline && !p.LastProbed.IsZero() && now.Sub(p.LastProbed) < 45*time.Second && p.SocialScore >= 70 {
+			continue
+		}
+		p.LastProbed = now
 		toCheck = append(toCheck, peerCheck{nodeID: id, addr: p.PublicAddr})
 	}
 
