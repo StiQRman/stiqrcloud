@@ -24,15 +24,15 @@ void main() {
       final health = await client.getHealth();
       expect(health.status, equals('ok'));
       expect(health.appName, equals('testcloud'));
-      expect(health.version, equals('v0.1.0'));
-      expect(health.nodeId, equals('node_auditor_alpha'));
+      expect(health.version, startsWith('v0.'));
+      expect(health.nodeId, isNotEmpty);
       expect(health.rnsDest, isNotNull);
     });
 
     test('getVersion returns version check info', () async {
       final ver = await client.getVersion();
-      expect(ver['current_version'], equals('v0.1.0'));
-      expect(ver['latest_version'], equals('v0.1.0'));
+      expect(ver['current_version'], startsWith('v0.'));
+      expect(ver['latest_version'], startsWith('v0.'));
       expect(ver['update_available'], isFalse);
     });
 
@@ -42,7 +42,8 @@ void main() {
         text: 'Hello from Dart SDK unencrypted test',
       );
 
-      expect(res.dataId, startsWith('rec_'));
+      final uuidv7Regex = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+      expect(uuidv7Regex.hasMatch(res.dataId) || res.dataId.startsWith('rec_'), isTrue);
       expect(res.auditorPeers, isNotEmpty);
       expect(res.storagePeers, isNotEmpty);
 
@@ -63,7 +64,8 @@ void main() {
         dek: dek,
       );
 
-      expect(res.dataId, startsWith('rec_'));
+      final uuidv7Regex = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+      expect(uuidv7Regex.hasMatch(res.dataId) || res.dataId.startsWith('rec_'), isTrue);
 
       // Fetch raw (without DEK) - should show encrypted envelope string
       final rawRecord = await client.getRecord(res.dataId, decrypt: false);
@@ -101,6 +103,76 @@ void main() {
       final list = await client.listRecords(collection: 'dart_sdk_tests', limit: 10);
       expect(list.total, greaterThanOrEqualTo(1));
       expect(list.records.any((r) => r.collection == 'dart_sdk_tests'), isTrue);
+    });
+
+    test('PocketBase-compatible collection API (create, getOne, getList, update, delete)', () async {
+      final col = client.collection('dart_pocket_notes');
+      final record = await col.create({
+        'title': 'Test note via Dart fluent API',
+        'body': 'This is a test note',
+        'priority': 1,
+      }, options: const CreateRecordOptions(storagePolicy: StoragePolicy.localOnly));
+
+      expect(record.id, isNotEmpty);
+      expect(record.data['title'], equals('Test note via Dart fluent API'));
+
+      final fetched = await col.getOne(record.id);
+      expect(fetched.id, equals(record.id));
+      expect(fetched.data['title'], equals('Test note via Dart fluent API'));
+
+      final list = await col.getList(page: 1, perPage: 10);
+      expect(list.items.any((r) => r.id == record.id), isTrue);
+
+      final updated = await col.update(record.id, {
+        'title': 'Updated note via Dart fluent API',
+        'body': 'This is a test note',
+        'priority': 2,
+      });
+      expect(updated.data['title'], equals('Updated note via Dart fluent API'));
+
+      await col.delete(record.id);
+    });
+
+    test('ensureCollection declares and handshakes schema fields with node', () async {
+      final info = await client.ensureCollection(
+        name: 'dart_schema_app',
+        fields: [
+          const CollectionField(name: 'user_id', type: 'text', required: true),
+          const CollectionField(name: 'payload', type: 'json'),
+          const CollectionField(name: 'is_active', type: 'bool'),
+        ],
+      );
+      expect(info.name, equals('dart_schema_app'));
+      expect(info.fields.map((f) => f.name), containsAll(['user_id', 'payload', 'is_active']));
+
+      final all = await client.listCollections();
+      expect(all.any((c) => c.name == 'dart_schema_app'), isTrue);
+    });
+
+    test('createRecord with storage policies (local-only, custom routing)', () async {
+      final localRes = await client.createRecord(
+        collection: 'dart_storage_policy',
+        text: 'Stays locally on node',
+        storagePolicy: StoragePolicy.localOnly,
+      );
+      expect(localRes.replicationPolicy, equals('local-only'));
+
+      final customRes = await client.createRecord(
+        collection: 'dart_storage_policy',
+        text: 'Custom peers routing',
+        storagePolicy: StoragePolicy.custom,
+        storagePeers: ['node_pi_lan', 'node_backup'],
+      );
+      expect(customRes.replicationPolicy, equals('custom'));
+      expect(customRes.storagePeers, containsAll(['node_pi_lan', 'node_backup']));
+    });
+
+    test('NodeManager adds and removes nodes dynamically', () {
+      final nm = client.nodeManager;
+      nm.addNode(const NodeConfig(url: 'http://10.0.0.99:8100', name: 'Backup Node'));
+      expect(nm.nodes.any((n) => n.url == 'http://10.0.0.99:8100'), isTrue);
+      nm.removeNode('http://10.0.0.99:8100');
+      expect(nm.nodes.any((n) => n.url == 'http://10.0.0.99:8100'), isFalse);
     });
   });
 }

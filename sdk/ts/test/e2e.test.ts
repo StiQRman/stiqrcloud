@@ -68,7 +68,10 @@ describe('TypeScript SDK Live End-to-End Integration', () => {
       storagePolicy: 'local-only',
     });
 
-    assert.ok(res.data_id.startsWith('rec_'));
+    assert.ok(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(res.data_id) ||
+      res.data_id.startsWith('rec_')
+    );
     assert.equal(res.replication_policy, 'local-only');
     assert.equal(res.storage_peers?.length || 0, 0);
 

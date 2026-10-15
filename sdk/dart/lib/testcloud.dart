@@ -11,3 +11,5 @@ export 'src/client.dart';
 export 'src/crypto.dart';
 export 'src/exceptions.dart';
 export 'src/models.dart';
+export 'src/node_manager.dart';
+export 'src/record_service.dart';

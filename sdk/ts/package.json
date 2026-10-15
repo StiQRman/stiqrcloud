@@ -1,6 +1,6 @@
 {
   "name": "@stiqrhub/testcloud",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Official TypeScript & JavaScript SDK for TestCloud decentralized storage mesh",
   "main": "./dist/index.js",

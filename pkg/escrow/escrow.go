@@ -461,14 +461,33 @@ func (m *Manager) GetContract(contractID string) (*StorageContract, error) {
 	return c, nil
 }
 
-// ListContracts returns all tracked contracts.
+// ListContracts returns a safe snapshot of all tracked contracts.
 func (m *Manager) ListContracts() []*StorageContract {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	var list []*StorageContract
 	for _, c := range m.contracts {
-		list = append(list, c)
+		clone := *c
+		if c.StorageNodes != nil {
+			clone.StorageNodes = make(map[string]int64, len(c.StorageNodes))
+			for k, v := range c.StorageNodes {
+				clone.StorageNodes[k] = v
+			}
+		}
+		if c.DisbursedSats != nil {
+			clone.DisbursedSats = make(map[string]int64, len(c.DisbursedSats))
+			for k, v := range c.DisbursedSats {
+				clone.DisbursedSats[k] = v
+			}
+		}
+		if c.LastAuditedAt != nil {
+			clone.LastAuditedAt = make(map[string]time.Time, len(c.LastAuditedAt))
+			for k, v := range c.LastAuditedAt {
+				clone.LastAuditedAt[k] = v
+			}
+		}
+		list = append(list, &clone)
 	}
 	return list
 }

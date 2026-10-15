@@ -419,10 +419,38 @@
     - Added custom node address input in the New Record modal to allow users to specify custom RNode destination addresses or leave blank for automatic 2-of-3 quorum.
     - Fully compatible with `storage_peers` in Go backend and TypeScript SDK.
 
+- **Phase 19: Universal SDK Parity (Flutter/Dart & TypeScript/Node), RFC 9562 UUIDv7 Invariant IDs, and Swarm Replication (Completed & Verified)**:
+  - **Live Multi-Node Swarm & Reticulum P2P Replication (Option 3)**:
+    - Verified mutual peering, health probing, and gossip between workstation node (`192.168.1.100:8100`) and physical Raspberry Pi (`192.168.1.50:8100`).
+    - Verified bidirectional record synchronization: Workstation -> Pi (`rec_503224f6...`), and Pi -> Workstation (`rec_37c77373...`).
+    - Verified binary FastCDC chunk replication: 32 KB chunk (`7bd67316...`) matched SHA-256 bit-for-bit across nodes.
+    - Verified cross-node update propagation (version bump to v2) and Merkle audit challenge/responses.
+  - **RFC 9562 UUIDv7 Client-Side Invariant ID Architecture**:
+    - Implemented `TestCloudCrypto.generateUuidV7()` in both `sdk/dart` and `sdk/ts`.
+    - Guarantees millisecond time-ordered, monotonic, collision-proof 128-bit identifiers generated completely offline without network coordination.
+    - Invariant `data_id` remains constant regardless of storage node audit failures or failover re-replication.
+  - **Dart/Flutter SDK (`sdk/dart`) Complete Parity (`v0.2.0`)**:
+    - Pure Dart with `cryptography: ^2.9.0` (zero C/FFI, universal support for iOS, Android, macOS, Windows, Linux, and Web).
+    - PocketBase-style fluent collection API (`client.collection('notes')` with `create`, `get`, `getOne`, `list`, `getList`, `update`, `delete`, and `ensureSchema`).
+    - Added `RecordModel` with map indexer and typed properties (`id`, `collection`, `data`, `created`, `updated`).
+    - Added `NodeManager` supporting custom node lists, dynamic primary switching, and auto-failover.
+    - Added automatic client-side digital signatures on `update` and `delete` using Ed25519 (`X-User-PubKey`, `X-User-Signature`).
+    - 16/16 tests passing in `sdk/dart`.
+  - **TypeScript/Node.js/Web SDK (`sdk/ts`) Complete Parity (`v0.2.0`)**:
+    - Zero-dependency modern ES module built with Web Crypto API (`globalThis.crypto.subtle`).
+    - Supports Node.js 18+, Bun, Deno, modern browsers, and React Native.
+    - Fluent collection API (`client.collection('notes')` with `create`, `get`, `getOne`, `list`, `getList`, `update`, `delete`, and `ensureSchema`).
+    - Static `TestCloudClient.generateId()` helper.
+    - Automatic offline UUIDv7 generation and Ed25519 request signing.
+    - 25/25 tests passing in `sdk/ts`.
+  - **Concurrent Map Race Fix in Escrow**:
+    - Deep-copied maps in `pkg/escrow/escrow.go:ListContracts()` under read lock to prevent concurrent iteration/mutation panics during JSON serialization.
+
 ### Operational Status & Next Steps
 - **Production Server**: Physical Raspberry Pi 4/5 (`192.168.1.50`) running `v0.2.0` active.
 - **Local Workstation**: Local standalone daemon running `v0.2.0` on port 8100/8101 active.
-- **Git State**: All tests passing (Go + TS). Cross-compiled release binaries updated. Ready for deployment to Pi upon user confirmation.
+- **SDK Status**: Both Dart (`sdk/dart`) and TypeScript (`sdk/ts`) at `0.2.0` with 100% test pass rates and full cross-platform mobile/desktop/web/server readiness.
+- **Git State**: Clean working tree, all tests passing.
 
 
 

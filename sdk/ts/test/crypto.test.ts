@@ -73,4 +73,18 @@ describe('TestCloudCrypto', () => {
     const isTamperedValid = await TestCloudCrypto.verify(tampered, signature, keyPair.publicKeyHex);
     assert.equal(isTamperedValid, false);
   });
+
+  it('should generate valid RFC 9562 UUIDv7 identifiers', () => {
+    const id1 = TestCloudCrypto.generateUuidV7();
+    const id2 = TestCloudCrypto.generateUuidV7();
+    const uuidv7Regex = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+    assert.match(id1, uuidv7Regex);
+    assert.match(id2, uuidv7Regex);
+    assert.notEqual(id1, id2);
+
+    // Verify static helper generateId
+    const staticId = TestCloudCrypto.generateId();
+    assert.match(staticId, uuidv7Regex);
+  });
 });

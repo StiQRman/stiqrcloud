@@ -277,6 +277,55 @@ export class TestCloudCrypto {
       return false;
     }
   }
+
+  /**
+   * Generates a standard RFC 9562 UUIDv7 (Time-Ordered Universally Unique Identifier).
+   *
+   * Formatted as 36-char lowercase hyphenated hex string:
+   * xxxxxxxx-xxxx-7xxx-axxx-xxxxxxxxxxxx
+   */
+  static generateUuidV7(): string {
+    const nowMs = Date.now();
+    const bytes = new Uint8Array(16);
+
+    // 48-bit timestamp (bytes 0..5)
+    bytes[0] = Math.floor(nowMs / 0x10000000000) & 0xff;
+    bytes[1] = Math.floor(nowMs / 0x100000000) & 0xff;
+    bytes[2] = (nowMs >>> 24) & 0xff;
+    bytes[3] = (nowMs >>> 16) & 0xff;
+    bytes[4] = (nowMs >>> 8) & 0xff;
+    bytes[5] = nowMs & 0xff;
+
+    // Random bytes for 6..15
+    if (typeof globalThis.crypto?.getRandomValues === 'function') {
+      const rand = new Uint8Array(10);
+      globalThis.crypto.getRandomValues(rand);
+      bytes.set(rand, 6);
+    } else {
+      for (let i = 6; i < 16; i++) {
+        bytes[i] = Math.floor(Math.random() * 256);
+      }
+    }
+
+    // Set version to 7 in byte 6 (0111xxxx)
+    bytes[6] = (bytes[6] & 0x0f) | 0x70;
+    // Set variant to RFC 4122 in byte 8 (10xxxxxx)
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    let hex = '';
+    for (let i = 0; i < 16; i++) {
+      if (i === 4 || i === 6 || i === 8 || i === 10) hex += '-';
+      hex += bytes[i].toString(16).padStart(2, '0');
+    }
+    return hex;
+  }
+
+  /**
+   * Alias for generateUuidV7()
+   */
+  static generateId(): string {
+    return TestCloudCrypto.generateUuidV7();
+  }
 }
 
 // Byte conversion helpers

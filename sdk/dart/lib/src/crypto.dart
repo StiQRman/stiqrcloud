@@ -195,6 +195,48 @@ class TestCloudCrypto {
     return crypto.sha256.convert(bytes).toString();
   }
 
+  /// Generates a standard RFC 9562 UUIDv7 (Time-Ordered Universally Unique Identifier).
+  ///
+  /// Structure: 48-bit millisecond timestamp + 12-bit rand_a + 62-bit rand_b.
+  /// Formatted as 36-char lowercase hyphenated hex string:
+  /// xxxxxxxx-xxxx-7xxx-axxx-xxxxxxxxxxxx
+  static String generateUuidV7() {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final bytes = Uint8List(16);
+
+    // 48-bit timestamp (bytes 0..5)
+    bytes[0] = (nowMs >> 40) & 0xFF;
+    bytes[1] = (nowMs >> 32) & 0xFF;
+    bytes[2] = (nowMs >> 24) & 0xFF;
+    bytes[3] = (nowMs >> 16) & 0xFF;
+    bytes[4] = (nowMs >> 8) & 0xFF;
+    bytes[5] = nowMs & 0xFF;
+
+    for (int i = 6; i < 16; i++) {
+      bytes[i] = _random.nextInt(256);
+    }
+
+    // Version 7 in byte 6
+    bytes[6] = (bytes[6] & 0x0F) | 0x70;
+    // Variant 1 (10xx) in byte 8
+    bytes[8] = (bytes[8] & 0x3F) | 0x80;
+
+    const hexChars = '0123456789abcdef';
+    final sb = StringBuffer();
+    for (int i = 0; i < 16; i++) {
+      if (i == 4 || i == 6 || i == 8 || i == 10) {
+        sb.write('-');
+      }
+      final b = bytes[i];
+      sb.write(hexChars[(b >> 4) & 0x0F]);
+      sb.write(hexChars[b & 0x0F]);
+    }
+    return sb.toString();
+  }
+
+  /// Alias for generateUuidV7()
+  static String generateId() => generateUuidV7();
+
   static Uint8List _hexToBytes(String hex) {
     final clean = hex.replaceAll(' ', '');
     final result = Uint8List(clean.length ~/ 2);

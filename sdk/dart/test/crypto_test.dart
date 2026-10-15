@@ -80,5 +80,18 @@ void main() {
       final decrypted = await TestCloudCrypto.decryptBytes(encrypted, dek);
       expect(decrypted, equals(binaryData));
     });
+
+    test('generateUuidV7 generates valid RFC 9562 UUIDv7', () {
+      final id1 = TestCloudCrypto.generateUuidV7();
+      final id2 = TestCloudCrypto.generateUuidV7();
+      final uuidv7Regex = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+
+      expect(uuidv7Regex.hasMatch(id1), isTrue, reason: 'id1 $id1 is not a valid UUIDv7');
+      expect(uuidv7Regex.hasMatch(id2), isTrue, reason: 'id2 $id2 is not a valid UUIDv7');
+      expect(id1, isNot(equals(id2)));
+
+      final staticId = TestCloudCrypto.generateId();
+      expect(uuidv7Regex.hasMatch(staticId), isTrue);
+    });
   });
 }

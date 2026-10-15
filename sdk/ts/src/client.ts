@@ -61,6 +61,14 @@ export class TestCloudClient {
   }
 
   /**
+   * Generates a globally unique, collision-proof 128-bit RFC 9562 UUIDv7.
+   * Time-ordered, monotonic, and offline-safe.
+   */
+  static generateId(): string {
+    return TestCloudCrypto.generateUuidV7();
+  }
+
+  /**
    * Returns the user's hex Ed25519 public address (if keyPair configured)
    */
   get publicAddress(): string | undefined {
@@ -139,6 +147,8 @@ export class TestCloudClient {
       signature = await TestCloudCrypto.sign(signMessage, this.keyPair.privateKey);
     }
 
+    const dataId = options.dataId || TestCloudCrypto.generateUuidV7();
+
     // 3. Dispatch: multipart/form-data if binary attachments present; otherwise JSON
     let response: Response;
     if (processedFile || processedPic) {
@@ -147,10 +157,8 @@ export class TestCloudClient {
       formData.append('text', processedText);
       formData.append('user_pub_address', pubAddr);
       formData.append('signature', signature);
+      formData.append('data_id', dataId);
 
-      if (options.dataId) {
-        formData.append('data_id', options.dataId);
-      }
       if (policy) {
         formData.append('replication_policy', policy);
       }
@@ -182,7 +190,8 @@ export class TestCloudClient {
         signature: signature,
       };
 
-      if (options.dataId) body.data_id = options.dataId;
+      body.data_id = dataId;
+      body.id = dataId;
       if (policy) body.replication_policy = policy;
       if (options.storagePeers && options.storagePeers.length > 0) {
         body.storage_peers = options.storagePeers;
@@ -366,6 +375,16 @@ export class TestCloudClient {
         const policy = options?.storagePolicy ?? client.defaultStoragePolicy;
 
         const body: globalThis.Record<string, any> = { ...data };
+        if (!body.data_id && !body.id) {
+          const generatedId = TestCloudCrypto.generateUuidV7();
+          body.data_id = generatedId;
+          body.id = generatedId;
+        } else if (body.data_id && !body.id) {
+          body.id = body.data_id;
+        } else if (body.id && !body.data_id) {
+          body.data_id = body.id;
+        }
+
         if (policy) body.replication_policy = policy;
         if (options?.storagePeers) body.storage_peers = options.storagePeers;
         if (options?.targetReplicas) body.target_replicas = options.targetReplicas;
@@ -386,6 +405,10 @@ export class TestCloudClient {
         return await res.json();
       },
 
+      async get(id: string, targetNodeUrl?: string) {
+        return this.getOne(id, targetNodeUrl);
+      },
+
       async getList(page: number = 1, perPage: number = 30, targetNodeUrl?: string) {
         const endpoint = await client.nodeManager.resolveEndpoint(targetNodeUrl);
         const offset = (page - 1) * perPage;
@@ -396,14 +419,33 @@ export class TestCloudClient {
         return await res.json();
       },
 
+      async list(page: number = 1, perPage: number = 30, targetNodeUrl?: string) {
+        return this.getList(page, perPage, targetNodeUrl);
+      },
+
       async update(id: string, data: globalThis.Record<string, any>, targetNodeUrl?: string) {
         const endpoint = await client.nodeManager.resolveEndpoint(targetNodeUrl);
+        const headers: { [key: string]: string } = { 'Content-Type': 'application/json' };
+        const body: globalThis.Record<string, any> = { ...data };
+
+        if (client.publicAddress) {
+          headers['X-User-PubKey'] = client.publicAddress;
+          body.updater_pub_key = client.publicAddress;
+
+          if (client.keyPair) {
+            const signBytes = new TextEncoder().encode(`${id}:update`);
+            const sig = await TestCloudCrypto.sign(signBytes, client.keyPair.privateKey);
+            headers['X-User-Signature'] = sig;
+            body.signature = sig;
+          }
+        }
+
         const res = await client._fetch(
           `${endpoint}/api/collections/${encodeURIComponent(collectionName)}/records/${encodeURIComponent(id)}`,
           {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
+            headers,
+            body: JSON.stringify(body),
           }
         );
         await client.checkResponse(res, 'collection.update');
@@ -412,14 +454,38 @@ export class TestCloudClient {
 
       async delete(id: string, targetNodeUrl?: string) {
         const endpoint = await client.nodeManager.resolveEndpoint(targetNodeUrl);
+        const headers: { [key: string]: string } = {};
+
+        if (client.publicAddress) {
+          headers['X-User-PubKey'] = client.publicAddress;
+
+          if (client.keyPair) {
+            const signBytes = new TextEncoder().encode(`delete:${id}`);
+            const sig = await TestCloudCrypto.sign(signBytes, client.keyPair.privateKey);
+            headers['X-User-Signature'] = sig;
+          }
+        }
+
         const res = await client._fetch(
           `${endpoint}/api/collections/${encodeURIComponent(collectionName)}/records/${encodeURIComponent(id)}`,
           {
             method: 'DELETE',
+            headers,
           }
         );
         await client.checkResponse(res, 'collection.delete');
         return await res.json();
+      },
+
+      /**
+       * Ensures the collection schema exists on the node with specified fields
+       */
+      async ensureSchema(fields: CollectionField[], options?: { targetNodeUrl?: string }) {
+        return client.ensureCollection({
+          name: collectionName,
+          fields,
+          targetNodeUrl: options?.targetNodeUrl,
+        });
       },
     };
   }

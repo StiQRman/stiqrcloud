@@ -8,6 +8,7 @@
 # Node Runtime Data
 /data/
 /data-*/
+/data_*/
 /test_cluster/
 *.db
 *.db-journal

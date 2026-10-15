@@ -6,21 +6,40 @@ import 'package:http/http.dart' as http;
 import 'crypto.dart';
 import 'exceptions.dart';
 import 'models.dart';
+import 'node_manager.dart';
+import 'record_service.dart';
 
 /// Official client for interacting with a TestCloud node or cluster.
+/// Supports both Dart/Flutter mobile apps and desktop/web/server backends.
 class TestCloudClient {
-  final String baseUrl;
+  final NodeManager nodeManager;
   final SimpleKeyPair? keyPair;
+  final String? defaultStoragePolicy;
   final http.Client _client;
 
   String? _cachedPublicAddress;
 
   TestCloudClient({
-    required String baseUrl,
+    String? baseUrl,
+    List<dynamic>? nodes,
     this.keyPair,
+    this.defaultStoragePolicy,
     http.Client? httpClient,
-  })  : baseUrl = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl,
-        _client = httpClient ?? http.Client();
+  })  : _client = httpClient ?? http.Client(),
+        nodeManager = NodeManager(
+          primaryUrl: baseUrl,
+          nodes: nodes,
+          httpClient: httpClient,
+        );
+
+  /// Primary node URL currently targeted by this client
+  String get baseUrl => nodeManager.primaryUrl;
+
+  /// Underlying HTTP client instance
+  http.Client get httpClient => _client;
+
+  /// Static helper to generate a collision-free RFC 9562 UUIDv7 offline
+  static String generateId() => TestCloudCrypto.generateUuidV7();
 
   /// Gets the hexadecimal Ed25519 public key address of the configured keyPair
   Future<String?> get publicAddress async {
@@ -29,25 +48,44 @@ class TestCloudClient {
     return _cachedPublicAddress;
   }
 
+  /// Adds a custom self-hosted or community node to the client's failover pool
+  NodeConfig addNode(String url, {String? name, bool isPrimary = false}) {
+    return nodeManager.addNode(url, name: name, isPrimary: isPrimary);
+  }
+
+  /// Sets the active primary node for all upcoming requests
+  void setPrimaryNode(String url) {
+    nodeManager.setPrimaryNode(url);
+  }
+
+  /// PocketBase-compatible fluent collection accessor:
+  /// `client.collection('notes').create({...})`
+  RecordService collection(String collectionName) {
+    return RecordService(this, collectionName);
+  }
+
   /// Checks node health, status, version, and Reticulum mesh destination
-  Future<NodeHealth> getHealth() async {
-    final uri = Uri.parse('$baseUrl/api/health');
+  Future<NodeHealth> getHealth([String? targetNodeUrl]) async {
+    final endpoint = await nodeManager.resolveEndpoint(targetNodeUrl);
+    final uri = Uri.parse('$endpoint/api/health');
     final response = await _client.get(uri);
-    _checkResponse(response, 'getHealth');
+    checkResponse(response, 'getHealth');
     final map = jsonDecode(response.body) as Map<String, dynamic>;
     return NodeHealth.fromJson(map);
   }
 
   /// Checks software update status against GitHub / release repository
-  Future<Map<String, dynamic>> getVersion() async {
-    final uri = Uri.parse('$baseUrl/api/version');
+  Future<Map<String, dynamic>> getVersion([String? targetNodeUrl]) async {
+    final endpoint = await nodeManager.resolveEndpoint(targetNodeUrl);
+    final uri = Uri.parse('$endpoint/api/version');
     final response = await _client.get(uri);
-    _checkResponse(response, 'getVersion');
+    checkResponse(response, 'getVersion');
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  /// Creates a new decentralized record in the cluster
+  /// Creates a new decentralized record in the cluster.
   ///
+  /// Automatically generates an offline UUIDv7 if [dataId] is omitted.
   /// If [encrypt] is true, [text], [fileBytes], and [pictureBytes] are encrypted
   /// client-side with AES-256-GCM using [dek] (or an auto-generated 256-bit DEK).
   ///
@@ -60,10 +98,17 @@ class TestCloudClient {
     List<int>? pictureBytes,
     String? pictureName,
     String? dataId,
+    String? storagePolicy,
+    List<String>? storagePeers,
+    int? targetReplicas,
+    String? targetNodeUrl,
     bool encrypt = false,
     List<int>? dek,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/records');
+    final endpoint = await nodeManager.resolveEndpoint(targetNodeUrl);
+    final uri = Uri.parse('$endpoint/api/records');
+    final policy = storagePolicy ?? defaultStoragePolicy;
+    final finalDataId = dataId ?? TestCloudCrypto.generateUuidV7();
 
     // Handle client-side end-to-end encryption if enabled
     String processedText = text;
@@ -99,8 +144,14 @@ class TestCloudClient {
       req.fields['text'] = processedText;
       req.fields['user_pub_address'] = pubAddr;
       req.fields['signature'] = signature;
-      if (dataId != null && dataId.isNotEmpty) {
-        req.fields['data_id'] = dataId;
+      req.fields['data_id'] = finalDataId;
+
+      if (policy != null) req.fields['replication_policy'] = policy;
+      if (storagePeers != null && storagePeers.isNotEmpty) {
+        req.fields['storage_peers'] = jsonEncode(storagePeers);
+      }
+      if (targetReplicas != null) {
+        req.fields['target_replicas'] = targetReplicas.toString();
       }
 
       if (processedFile != null) {
@@ -118,46 +169,48 @@ class TestCloudClient {
         ));
       }
 
-      final streamedResponse = await _client.send(req);
-      final res = await http.Response.fromStream(streamedResponse);
-      _checkResponse(res, 'createRecord (multipart)');
-      final jsonMap = jsonDecode(res.body) as Map<String, dynamic>;
-      return CreateRecordResponse.fromJson(jsonMap);
+      final streamed = await _client.send(req);
+      final resp = await http.Response.fromStream(streamed);
+      checkResponse(resp, 'createRecord');
+      final map = jsonDecode(resp.body) as Map<String, dynamic>;
+      return CreateRecordResponse.fromJson(map);
     } else {
-      final body = {
+      final body = <String, dynamic>{
         'collection': collection,
         'text': processedText,
         'user_pub_address': pubAddr,
         'signature': signature,
-        if (dataId != null && dataId.isNotEmpty) 'data_id': dataId,
+        'data_id': finalDataId,
       };
 
-      final res = await _client.post(
+      if (policy != null) body['replication_policy'] = policy;
+      if (storagePeers != null && storagePeers.isNotEmpty) {
+        body['storage_peers'] = storagePeers;
+      }
+      if (targetReplicas != null) body['target_replicas'] = targetReplicas;
+
+      final resp = await _client.post(
         uri,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(body),
       );
-      _checkResponse(res, 'createRecord (json)');
-      final jsonMap = jsonDecode(res.body) as Map<String, dynamic>;
-      return CreateRecordResponse.fromJson(jsonMap);
+      checkResponse(resp, 'createRecord');
+      final map = jsonDecode(resp.body) as Map<String, dynamic>;
+      return CreateRecordResponse.fromJson(map);
     }
   }
 
-  /// Retrieves a record by its invariant persistent DataID
-  ///
-  /// Any node in the cluster will resolve the record even if stored on other peers.
-  /// If [decrypt] is true and a valid [dek] is provided, encrypted text is automatically decrypted.
+  /// Fetches a record by [dataId]
   Future<Record> getRecord(
     String dataId, {
     bool decrypt = false,
     List<int>? dek,
+    String? targetNodeUrl,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/records/$dataId');
+    final endpoint = await nodeManager.resolveEndpoint(targetNodeUrl);
+    final uri = Uri.parse('$endpoint/api/records/$dataId');
     final res = await _client.get(uri);
-    if (res.statusCode == 404) {
-      throw TestCloudNotFoundException(dataId, res.body);
-    }
-    _checkResponse(res, 'getRecord');
+    checkResponse(res, 'getRecord');
 
     final jsonMap = jsonDecode(res.body) as Map<String, dynamic>;
     final record = Record.fromJson(jsonMap);
@@ -165,14 +218,14 @@ class TestCloudClient {
     if (decrypt && dek != null && record.text.isNotEmpty) {
       final envelope = EncryptedEnvelope.tryParse(record.text);
       if (envelope != null) {
-        final decryptedText = await TestCloudCrypto.decryptText(envelope, dek);
+        final plainText = await TestCloudCrypto.decryptText(envelope, dek);
         return Record(
           dataId: record.dataId,
           collection: record.collection,
           userPubAddress: record.userPubAddress,
           ownerSignature: record.ownerSignature,
           version: record.version,
-          text: decryptedText,
+          text: plainText,
           fileName: record.fileName,
           pictureName: record.pictureName,
           fileChunkHash: record.fileChunkHash,
@@ -187,28 +240,73 @@ class TestCloudClient {
         );
       }
     }
-
     return record;
   }
 
-  /// Lists records, optionally filtered by collection
+  /// Lists records across collections with pagination
   Future<RecordList> listRecords({
     String? collection,
     int limit = 50,
     int offset = 0,
+    String? targetNodeUrl,
   }) async {
+    final endpoint = await nodeManager.resolveEndpoint(targetNodeUrl);
     final queryParams = <String, String>{
       'limit': limit.toString(),
       'offset': offset.toString(),
       if (collection != null && collection.isNotEmpty) 'collection': collection,
     };
 
-    final uri = Uri.parse('$baseUrl/api/records').replace(queryParameters: queryParams);
+    final uri = Uri.parse('$endpoint/api/records').replace(queryParameters: queryParams);
     final res = await _client.get(uri);
-    _checkResponse(res, 'listRecords');
+    checkResponse(res, 'listRecords');
 
     final jsonMap = jsonDecode(res.body) as Map<String, dynamic>;
     return RecordList.fromJson(jsonMap);
+  }
+
+  /// Declares or handshakes a collection and its schema fields with a node
+  Future<CollectionInfo> ensureCollection({
+    required String name,
+    List<CollectionField>? fields,
+    String? targetNodeUrl,
+  }) async {
+    final endpoint = await nodeManager.resolveEndpoint(targetNodeUrl);
+    final uri = Uri.parse('$endpoint/api/collections/ensure');
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    final pub = await publicAddress;
+    if (pub != null) headers['X-User-PubKey'] = pub;
+
+    final body = jsonEncode({
+      'name': name,
+      'fields': fields?.map((f) => f.toJson()).toList() ?? [],
+    });
+
+    final resp = await _client.post(uri, headers: headers, body: body);
+    checkResponse(resp, 'ensureCollection');
+    final map = jsonDecode(resp.body) as Map<String, dynamic>;
+    return CollectionInfo.fromJson(map);
+  }
+
+  /// Lists all registered collections on the node
+  Future<List<CollectionInfo>> listCollections([String? targetNodeUrl]) async {
+    final endpoint = await nodeManager.resolveEndpoint(targetNodeUrl);
+    final uri = Uri.parse('$endpoint/api/dashboard/collections');
+    final resp = await _client.get(uri);
+    checkResponse(resp, 'listCollections');
+    final map = jsonDecode(resp.body) as Map<String, dynamic>;
+    final list = map['collections'] as List? ?? [];
+    return list.map((c) => CollectionInfo.fromJson(c as Map<String, dynamic>)).toList();
+  }
+
+  /// Lists all known swarm peers in the cluster
+  Future<List<Peer>> listPeers([String? targetNodeUrl]) async {
+    final endpoint = await nodeManager.resolveEndpoint(targetNodeUrl);
+    final uri = Uri.parse('$endpoint/api/peers');
+    final res = await _client.get(uri);
+    checkResponse(res, 'listPeers');
+    final list = jsonDecode(res.body) as List? ?? [];
+    return list.map((p) => Peer.fromJson(p as Map<String, dynamic>)).toList();
   }
 
   /// Downloads the file binary blob associated with [dataId]
@@ -216,10 +314,12 @@ class TestCloudClient {
     String dataId, {
     bool decrypt = false,
     List<int>? dek,
+    String? targetNodeUrl,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/records/$dataId/file');
+    final endpoint = await nodeManager.resolveEndpoint(targetNodeUrl);
+    final uri = Uri.parse('$endpoint/api/records/$dataId/file');
     final res = await _client.get(uri);
-    _checkResponse(res, 'downloadFile');
+    checkResponse(res, 'downloadFile');
 
     if (decrypt && dek != null) {
       final plain = await TestCloudCrypto.decryptBytes(res.bodyBytes, dek);
@@ -233,10 +333,12 @@ class TestCloudClient {
     String dataId, {
     bool decrypt = false,
     List<int>? dek,
+    String? targetNodeUrl,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/records/$dataId/picture');
+    final endpoint = await nodeManager.resolveEndpoint(targetNodeUrl);
+    final uri = Uri.parse('$endpoint/api/records/$dataId/picture');
     final res = await _client.get(uri);
-    _checkResponse(res, 'downloadPicture');
+    checkResponse(res, 'downloadPicture');
 
     if (decrypt && dek != null) {
       final plain = await TestCloudCrypto.decryptBytes(res.bodyBytes, dek);
@@ -245,23 +347,15 @@ class TestCloudClient {
     return res.bodyBytes;
   }
 
-  /// Lists all known swarm peers in the cluster
-  Future<List<dynamic>> listPeers() async {
-    final uri = Uri.parse('$baseUrl/api/peers');
-    final res = await _client.get(uri);
-    _checkResponse(res, 'listPeers');
-    return jsonDecode(res.body) as List<dynamic>;
-  }
-
   /// Realtime stream that polls the cluster for newly arrived or updated records
   Stream<Record> pollRecords({
     String? collection,
     Duration interval = const Duration(seconds: 3),
+    String? targetNodeUrl,
   }) async* {
     final seenDataIds = <String>{};
-    // Prime with existing records
     try {
-      final initial = await listRecords(collection: collection, limit: 100);
+      final initial = await listRecords(collection: collection, limit: 100, targetNodeUrl: targetNodeUrl);
       for (final rec in initial.records) {
         seenDataIds.add(rec.dataId);
       }
@@ -270,7 +364,7 @@ class TestCloudClient {
     while (true) {
       await Future.delayed(interval);
       try {
-        final current = await listRecords(collection: collection, limit: 50);
+        final current = await listRecords(collection: collection, limit: 50, targetNodeUrl: targetNodeUrl);
         for (final rec in current.records) {
           if (!seenDataIds.contains(rec.dataId)) {
             seenDataIds.add(rec.dataId);
@@ -281,7 +375,7 @@ class TestCloudClient {
     }
   }
 
-  void _checkResponse(http.Response response, String operation) {
+  void checkResponse(http.Response response, String operation) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return;
     }

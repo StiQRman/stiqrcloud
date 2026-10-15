@@ -407,12 +407,16 @@ func (s *Store) UpdateRecord(dataID string, updaterPubKey string, signature stri
 			toSign3 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version))
 			toSign4 := []byte(fmt.Sprintf("%s:%d", dataID, rec.Version+1))
 			toSign5 := []byte(fmt.Sprintf("%s:%s", dataID, newText))
+			toSign6 := []byte(fmt.Sprintf("%s:update", dataID))
+			toSign7 := []byte(dataID)
 
 			valid := crypto.VerifyHybridSignature(toSign1, updaterPubKey, signature) ||
 				crypto.VerifyHybridSignature(toSign2, updaterPubKey, signature) ||
 				crypto.VerifyHybridSignature(toSign3, updaterPubKey, signature) ||
 				crypto.VerifyHybridSignature(toSign4, updaterPubKey, signature) ||
-				crypto.VerifyHybridSignature(toSign5, updaterPubKey, signature)
+				crypto.VerifyHybridSignature(toSign5, updaterPubKey, signature) ||
+				crypto.VerifyHybridSignature(toSign6, updaterPubKey, signature) ||
+				crypto.VerifyHybridSignature(toSign7, updaterPubKey, signature)
 
 			if !valid {
 				return nil, errors.New("unauthorized: invalid signature for record update")
