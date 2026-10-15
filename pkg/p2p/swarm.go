@@ -221,7 +221,10 @@ func (s *Swarm) AddBootstrapPeer(addr string) {
 
 const MaxPeers = 500
 
-func isValidPeerAddress(addr string) bool {
+// IsValidPeerAddress validates that a peer address is a valid HTTP/HTTPS URL,
+// blocking cloud metadata services, link-local, and unspecified addresses.
+// If rejectPrivate is true (e.g. on public gateway nodes), loopback and private subnets are also rejected.
+func IsValidPeerAddress(addr string, rejectPrivate bool) bool {
 	if addr == "" {
 		return true
 	}
@@ -236,15 +239,33 @@ func isValidPeerAddress(addr string) bool {
 	if host == "" {
 		return false
 	}
-	if host == "169.254.169.254" || host == "metadata.google.internal" || strings.HasPrefix(host, "169.254.") {
+	lowerHost := strings.ToLower(host)
+	// Always block cloud metadata endpoints
+	if lowerHost == "169.254.169.254" || lowerHost == "metadata.google.internal" || strings.HasPrefix(lowerHost, "169.254.") {
 		return false
 	}
 	if ip := net.ParseIP(host); ip != nil {
 		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
 			return false
 		}
+		if rejectPrivate {
+			if ip.IsLoopback() || ip.IsPrivate() {
+				return false
+			}
+		}
+	} else {
+		// Host is a domain name
+		if rejectPrivate {
+			if lowerHost == "localhost" || strings.HasSuffix(lowerHost, ".localhost") || strings.HasSuffix(lowerHost, ".local") || strings.HasSuffix(lowerHost, ".lan") {
+				return false
+			}
+		}
 	}
 	return true
+}
+
+func isValidPeerAddress(addr string) bool {
+	return IsValidPeerAddress(addr, false)
 }
 
 func (s *Swarm) evictStalePeerLocked() {
@@ -285,7 +306,7 @@ func (s *Swarm) RegisterDirectPeer(p *Peer) {
 	}
 
 	// Filter out invalid/SSRF targets
-	if !isValidPeerAddress(p.PublicAddr) {
+	if !IsValidPeerAddress(p.PublicAddr, s.isPublic) {
 		p.PublicAddr = ""
 	}
 
@@ -341,7 +362,7 @@ func (s *Swarm) RegisterPeer(p *Peer) {
 	}
 
 	// Filter out invalid/SSRF targets
-	if !isValidPeerAddress(p.PublicAddr) {
+	if !IsValidPeerAddress(p.PublicAddr, s.isPublic) {
 		p.PublicAddr = ""
 	}
 
@@ -878,7 +899,10 @@ func (s *Swarm) BroadcastRecordFull(rec *storage.Record, storagePeers []string, 
 // ConnectPeer contacts a remote peer, announces the local node, and learns peers.
 func (s *Swarm) ConnectPeer(peerURL string, rnsDest string, isPublic bool, price int64) error {
 	peerURL = strings.TrimRight(peerURL, "/")
-	if peerURL == "" || strings.Contains(peerURL, "0.0.0.0") || strings.Contains(peerURL, "127.0.0.1") || strings.Contains(peerURL, "localhost") {
+	if !IsValidPeerAddress(peerURL, s.isPublic) {
+		return nil
+	}
+	if peerURL == "" || (s.localAddr != "" && peerURL == s.localAddr) {
 		return nil
 	}
 

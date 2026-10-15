@@ -144,7 +144,9 @@ func isLocalAdminPath(path string) bool {
 		strings.HasPrefix(path, "/api/dashboard/") ||
 		strings.HasPrefix(path, "/api/escrow/") ||
 		strings.HasPrefix(path, "/api/audit/") ||
-		strings.HasPrefix(path, "/api/storage/quota")
+		strings.HasPrefix(path, "/api/storage/quota") ||
+		strings.HasPrefix(path, "/api/reticulum/send") ||
+		strings.HasPrefix(path, "/api/reticulum/announce")
 }
 
 // Handler returns the HTTP handler with CORS support.
@@ -244,9 +246,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/dashboard/records", s.localOnly(dash.HandleRecordsJSON))
 	s.mux.HandleFunc("/api/dashboard/collections", s.localOnly(dash.HandleCollectionsJSON))
 
-	// Reticulum Peer-to-Peer Packet API
-	s.mux.HandleFunc("/api/reticulum/send", s.handleReticulumSend)
-	s.mux.HandleFunc("/api/reticulum/announce", s.handleReticulumAnnounce)
+	// Reticulum Peer-to-Peer Packet API (Admin - Local Only)
+	s.mux.HandleFunc("/api/reticulum/send", s.localOnly(s.handleReticulumSend))
+	s.mux.HandleFunc("/api/reticulum/announce", s.localOnly(s.handleReticulumAnnounce))
 	s.mux.HandleFunc("/api/reticulum/status", s.handleReticulumStatus)
 
 	if s.rnsManager != nil {
@@ -1310,6 +1312,11 @@ func (s *Server) handleRecordDetail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
 			return
 		}
+		// Security (SEC-02): Unowned records can strictly only be deleted by local node administrators
+		if rec, err := s.store.GetRecord(dataID); err == nil && rec.UserPubAddress == "" && !s.isLocalRequest(r) {
+			http.Error(w, "Forbidden: deletion of unowned records is restricted to local node administrators", http.StatusForbidden)
+			return
+		}
 		if err := s.store.DeleteRecord(dataID, callerPubKey, sig); err != nil {
 			http.Error(w, err.Error(), http.StatusForbidden)
 			return
@@ -1662,6 +1669,11 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 						http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
 						return
 					}
+					// Security (SEC-02): Unowned records can strictly only be deleted by local node administrators
+					if rec, err := s.store.GetRecord(recordID); err == nil && rec.UserPubAddress == "" && !s.isLocalRequest(r) {
+						http.Error(w, "Forbidden: deletion of unowned records is restricted to local node administrators", http.StatusForbidden)
+						return
+					}
 					if err := s.store.DeleteRecord(recordID, callerPubKey, sig); err != nil {
 						http.Error(w, err.Error(), http.StatusForbidden)
 						return
@@ -1739,6 +1751,8 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", name))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(chunk)
 }
@@ -2123,6 +2137,12 @@ func (s *Server) handleSDKDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Security (SEC-02): Unowned records can strictly only be deleted by local node administrators
+	if rec, err := s.store.GetRecord(dataID); err == nil && rec.UserPubAddress == "" && !s.isLocalRequest(r) {
+		http.Error(w, "Forbidden: deletion of unowned records is restricted to local node administrators", http.StatusForbidden)
+		return
+	}
+
 	err := s.store.DeleteRecord(dataID, body.OwnerPubKey, body.Signature)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -2227,7 +2247,8 @@ func (s *Server) handleDiscoveryAnnounce(w http.ResponseWriter, r *http.Request)
 			}
 		}
 		pubAddr := req.PublicAddr
-		if strings.Contains(pubAddr, "0.0.0.0") || strings.Contains(pubAddr, "127.0.0.1") || strings.Contains(pubAddr, "localhost") {
+		rejectPrivate := !s.isLocalRequest(r) || s.isPublic
+		if !p2p.IsValidPeerAddress(pubAddr, rejectPrivate) || strings.Contains(pubAddr, "0.0.0.0") || (s.publicAddr != "" && pubAddr == s.publicAddr) {
 			pubAddr = ""
 		}
 		s.swarm.RegisterDirectPeer(&p2p.Peer{
@@ -2657,6 +2678,34 @@ $randomId = Get-Random -Minimum 1000 -Maximum 9999
 Write-Host "-> Downloading latest StiQRcloud for Windows..."
 Invoke-WebRequest -Uri "%s/download/stiqrcloud-windows-amd64.exe?v=$randomId" -OutFile $binPath
 
+Write-Host "-> Verifying binary SHA256 integrity..."
+$checksumUrl = "%s/download/checksums.txt"
+$checksumFile = "$destDir\checksums.txt"
+try {
+    Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumFile -ErrorAction SilentlyContinue
+    if (Test-Path $checksumFile) {
+        $lines = Get-Content $checksumFile
+        $expectedHash = ""
+        foreach ($line in $lines) {
+            if ($line -match "stiqrcloud-windows-amd64\.exe") {
+                $expectedHash = ($line -split "\s+")[0].Trim()
+                break
+            }
+        }
+        if ($expectedHash) {
+            $actualHash = (Get-FileHash -Path $binPath -Algorithm SHA256).Hash.ToLower()
+            if ($actualHash -ne $expectedHash.ToLower()) {
+                Write-Host "Error: SHA256 checksum mismatch!"
+                Write-Host "Expected: $expectedHash"
+                Write-Host "Got:      $actualHash"
+                Remove-Item -Path $binPath -Force -ErrorAction SilentlyContinue
+                exit 1
+            }
+            Write-Host "-> SHA256 integrity verified ($actualHash)."
+        }
+    }
+} catch {}
+
 $nodeName = "WindowsNode-$randomId"
 $discoveryUrl = "%s"
 
@@ -2667,7 +2716,7 @@ Write-Host "-> Private Dashboard active at: http://localhost:8100/dashboard"
 Write-Host "=================================================================="
 
 & $binPath -host 0.0.0.0 -port 8100 -rns-gateway "176.84.102.17:4242" -discovery-url "$discoveryUrl" -peers "$discoveryUrl" -data-dir "$destDir\data" -name "$nodeName"
-`, baseURL, baseURL)
+`, baseURL, baseURL, baseURL)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)

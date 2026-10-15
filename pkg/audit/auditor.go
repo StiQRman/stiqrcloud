@@ -259,8 +259,10 @@ func (c *Coordinator) RunAuditCycle() []AuditResult {
 				if found && peer.PublicAddr != "" {
 					resp, err := client.Get(fmt.Sprintf("%s/api/health", peer.PublicAddr))
 					latencyMs = float64(time.Since(start).Milliseconds())
-					if err == nil && resp.StatusCode == http.StatusOK {
+					if resp != nil {
 						_ = resp.Body.Close()
+					}
+					if err == nil && resp.StatusCode == http.StatusOK {
 						isHealthy = true
 						notes = "Storage node online & Merkle proof verified"
 					} else {

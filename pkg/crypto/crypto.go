@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -113,7 +114,7 @@ type MerkleTree struct {
 	Root   []byte
 }
 
-// BuildMerkleTree builds a Merkle tree from chunk hashes.
+// BuildMerkleTree builds a Merkle tree from chunk hashes with RFC 6962 domain separation.
 func BuildMerkleTree(chunkHashes []string) (*MerkleTree, error) {
 	if len(chunkHashes) == 0 {
 		return nil, errors.New("cannot build merkle tree with zero chunks")
@@ -125,7 +126,10 @@ func BuildMerkleTree(chunkHashes []string) (*MerkleTree, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid chunk hash %q: %w", h, err)
 		}
-		leaves[i] = b
+		// RFC 6962 leaf domain separation prefix (0x00)
+		leafData := append([]byte{0x00}, b...)
+		leafHash := sha256.Sum256(leafData)
+		leaves[i] = leafHash[:]
 	}
 
 	root := computeMerkleRoot(leaves)
@@ -136,6 +140,9 @@ func BuildMerkleTree(chunkHashes []string) (*MerkleTree, error) {
 }
 
 func computeMerkleRoot(nodes [][]byte) []byte {
+	if len(nodes) == 0 {
+		return nil
+	}
 	if len(nodes) == 1 {
 		return nodes[0]
 	}
@@ -143,14 +150,16 @@ func computeMerkleRoot(nodes [][]byte) []byte {
 	var nextLevel [][]byte
 	for i := 0; i < len(nodes); i += 2 {
 		if i+1 < len(nodes) {
-			combined := append(nodes[i], nodes[i+1]...)
+			// RFC 6962 interior node domain separation prefix (0x01)
+			combined := make([]byte, 0, 1+len(nodes[i])+len(nodes[i+1]))
+			combined = append(combined, 0x01)
+			combined = append(combined, nodes[i]...)
+			combined = append(combined, nodes[i+1]...)
 			h := sha256.Sum256(combined)
 			nextLevel = append(nextLevel, h[:])
 		} else {
-			// Odd element: duplicate and hash
-			combined := append(nodes[i], nodes[i]...)
-			h := sha256.Sum256(combined)
-			nextLevel = append(nextLevel, h[:])
+			// Promote unpaired odd node directly to next level without duplication (prevents CVE-2012-2459 duplication attacks)
+			nextLevel = append(nextLevel, nodes[i])
 		}
 	}
 	return computeMerkleRoot(nextLevel)
@@ -169,7 +178,8 @@ func ComputeAuditResponse(chunkBytes []byte, nonce string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// VerifyAuditResponse verifies an auditor's challenge against the expected answer.
+// VerifyAuditResponse verifies an auditor's challenge against the expected answer in constant time.
 func VerifyAuditResponse(chunkBytes []byte, nonce string, expectedResponse string) bool {
-	return ComputeAuditResponse(chunkBytes, nonce) == expectedResponse
+	actual := ComputeAuditResponse(chunkBytes, nonce)
+	return subtle.ConstantTimeCompare([]byte(actual), []byte(expectedResponse)) == 1
 }

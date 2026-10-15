@@ -342,12 +342,21 @@ func TestReticulumAPIEndpointsAndRecordReception(t *testing.T) {
 		t.Fatalf("Expected 200 OK for /api/reticulum/status, got %d", recStatus.Code)
 	}
 
-	// 2. Announce endpoint
-	reqAnn := httptest.NewRequest("POST", "/api/reticulum/announce", nil)
-	recAnn := httptest.NewRecorder()
-	handler.ServeHTTP(recAnn, reqAnn)
-	if recAnn.Code != http.StatusOK {
-		t.Fatalf("Expected 200 OK for /api/reticulum/announce, got %d", recAnn.Code)
+	// 2. Announce endpoint: WAN request must be blocked (403 Forbidden)
+	reqAnnWAN := httptest.NewRequest("POST", "/api/reticulum/announce", nil)
+	recAnnWAN := httptest.NewRecorder()
+	handler.ServeHTTP(recAnnWAN, reqAnnWAN)
+	if recAnnWAN.Code != http.StatusForbidden {
+		t.Fatalf("SECURITY VIOLATION: Expected 403 Forbidden for WAN /api/reticulum/announce, got %d", recAnnWAN.Code)
+	}
+
+	// Local announce request must succeed (200 OK)
+	reqAnnLocal := httptest.NewRequest("POST", "http://127.0.0.1:8100/api/reticulum/announce", nil)
+	reqAnnLocal.RemoteAddr = "127.0.0.1:40000"
+	recAnnLocal := httptest.NewRecorder()
+	handler.ServeHTTP(recAnnLocal, reqAnnLocal)
+	if recAnnLocal.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for local /api/reticulum/announce, got %d", recAnnLocal.Code)
 	}
 
 	// 3. Directly simulate an incoming Reticulum packet (Context 0x01 = Record)

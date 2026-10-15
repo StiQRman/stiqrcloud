@@ -375,6 +375,7 @@ func (im *InterfaceManager) readTCP(conn net.Conn, remote string) {
 		im.mu.Unlock()
 	}()
 
+	const maxHDLCFrameSize = 65536
 	buf := make([]byte, 4096)
 	var frameBuf []byte
 	inFrame := false
@@ -392,6 +393,12 @@ func (im *InterfaceManager) readTCP(conn net.Conn, remote string) {
 					unescaped := UnescapeHDLC(frameBuf)
 					if p, err := DecodePacket(unescaped); err == nil {
 						im.mu.Lock()
+						if len(im.peers) >= 1000 {
+							for k := range im.peers {
+								delete(im.peers, k)
+								break
+							}
+						}
 						im.peers[p.Destination.Hex()] = time.Now()
 						handler := im.onPacket
 						im.mu.Unlock()
@@ -404,7 +411,13 @@ func (im *InterfaceManager) readTCP(conn net.Conn, remote string) {
 				}
 				inFrame = true
 			} else if inFrame {
-				frameBuf = append(frameBuf, b)
+				if len(frameBuf) < maxHDLCFrameSize {
+					frameBuf = append(frameBuf, b)
+				} else {
+					// Drop oversized frame to prevent memory exhaustion DoS
+					frameBuf = frameBuf[:0]
+					inFrame = false
+				}
 			}
 		}
 	}
@@ -597,6 +610,12 @@ func (im *InterfaceManager) readLoop() {
 		}
 
 		im.mu.Lock()
+		if len(im.peers) >= 1000 {
+			for k := range im.peers {
+				delete(im.peers, k)
+				break
+			}
+		}
 		im.peers[p.Destination.Hex()] = time.Now()
 		handler := im.onPacket
 		im.mu.Unlock()

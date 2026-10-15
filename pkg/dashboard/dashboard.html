@@ -1250,7 +1250,7 @@
       if (activeRecord.file_name) {
         fileRow.style.display = 'block';
         document.getElementById('detail-filename').textContent = activeRecord.file_name;
-        document.getElementById('detail-file-download').href = `/api/records/${activeRecord.data_id}/file`;
+        document.getElementById('detail-file-download').href = `/api/records/${encodeURIComponent(activeRecord.data_id)}/file`;
       } else {
         fileRow.style.display = 'none';
       }
@@ -1297,10 +1297,11 @@
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:14px;">No attached chunks (Text only record).</td></tr>';
         return;
       }
+      const shortHash = activeRecord.file_chunk_hash ? (activeRecord.file_chunk_hash.length > 16 ? activeRecord.file_chunk_hash.substring(0, 16) + '...' : activeRecord.file_chunk_hash) : '-';
       tbody.innerHTML = `
         <tr>
           <td>1</td>
-          <td class="mono" style="font-size:0.75rem;">${activeRecord.file_chunk_hash.substring(0, 16)}...</td>
+          <td class="mono" style="font-size:0.75rem;">${escapeHTML(shortHash)}</td>
           <td class="mono" style="font-size:0.75rem;">AES-256-GCM (Protected)</td>
           <td>${(activeRecord.total_bytes / 1024).toFixed(1)} KB</td>
           <td><span class="badge badge-success">Stored</span></td>

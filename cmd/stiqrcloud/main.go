@@ -168,8 +168,13 @@ func main() {
 	})
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf("%s:%d", *host, *port),
-		Handler: gw.Handler(),
+		Addr:              fmt.Sprintf("%s:%d", *host, *port),
+		Handler:           gw.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MB
 	}
 
 	// Startup Banner
@@ -203,8 +208,13 @@ func main() {
 	var dashServer *http.Server
 	if *dashPort > 0 && *dashPort != *port {
 		dashServer = &http.Server{
-			Addr:    fmt.Sprintf("%s:%d", *host, *dashPort),
-			Handler: gw.Handler(),
+			Addr:              fmt.Sprintf("%s:%d", *host, *dashPort),
+			Handler:           gw.Handler(),
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      60 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			MaxHeaderBytes:    1 << 20, // 1 MB
 		}
 		go func() {
 			if err := dashServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

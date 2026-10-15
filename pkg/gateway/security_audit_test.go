@@ -186,3 +186,97 @@ func TestAudit_AllExternalSecurityIssues(t *testing.T) {
 	hasChecksumVerification := bytes.Contains([]byte(scriptBody), []byte("sha256sum"))
 	t.Logf("[Issue 8] Installer Script Verifies SHA256 Checksum: HasChecksum=%v", hasChecksumVerification)
 }
+
+func TestAudit_ComprehensiveHardening(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "stiqrcloud_hardening_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	store, _ := storage.NewStore(tempDir)
+	srv := NewServer(Config{
+		Store:    store,
+		IsPublic: true,
+	})
+	handler := srv.Handler()
+
+	// 1. SEC-02: Public WAN deletion of unowned/anonymous records MUST be 403 Forbidden!
+	unownedRec := &storage.Record{
+		DataID:     "unowned-doc-001",
+		Collection: "notes",
+		Text:       "Sensitive internal document without explicit owner key",
+	}
+	_, _ = store.CreateRecord(unownedRec, nil, nil)
+
+	// WAN deletion attempt (no local IP)
+	reqDelWAN := httptest.NewRequest("DELETE", "/api/records/unowned-doc-001", nil)
+	wDelWAN := httptest.NewRecorder()
+	handler.ServeHTTP(wDelWAN, reqDelWAN)
+	if wDelWAN.Code != http.StatusForbidden {
+		t.Fatalf("[SEC-02] SECURITY VIOLATION: Unowned record deleted over WAN! Got status %d, want 403", wDelWAN.Code)
+	}
+
+	// Verify unowned record is still intact
+	if _, err := store.GetRecord("unowned-doc-001"); err != nil {
+		t.Fatalf("[SEC-02] Unowned record was erroneously deleted!")
+	}
+
+	// Local deletion attempt MUST succeed (200 OK)
+	reqDelLocal := httptest.NewRequest("DELETE", "http://127.0.0.1:8100/api/records/unowned-doc-001", nil)
+	reqDelLocal.RemoteAddr = "127.0.0.1:54321"
+	wDelLocal := httptest.NewRecorder()
+	handler.ServeHTTP(wDelLocal, reqDelLocal)
+	if wDelLocal.Code != http.StatusOK {
+		t.Fatalf("[SEC-02] Local administrative deletion of unowned record failed: got %d, want 200", wDelLocal.Code)
+	}
+
+	// 2. SEC-03: WAN access to /api/reticulum/send MUST be 403 Forbidden!
+	reqRnsSend := httptest.NewRequest("POST", "/api/reticulum/send", bytes.NewReader([]byte(`{"target_dest":"1234","text":"forged"}`)))
+	wRnsSend := httptest.NewRecorder()
+	handler.ServeHTTP(wRnsSend, reqRnsSend)
+	if wRnsSend.Code != http.StatusForbidden {
+		t.Fatalf("[SEC-03] SECURITY VIOLATION: WAN access to /api/reticulum/send permitted! Got %d, want 403", wRnsSend.Code)
+	}
+
+	// 3. SEC-04: Merkle Tree Odd-Leaf Collision Resistance (CVE-2012-2459 prevention)
+	leafA := crypto.HashBytes([]byte("chunk A"))
+	leafB := crypto.HashBytes([]byte("chunk B"))
+	leafC := crypto.HashBytes([]byte("chunk C"))
+
+	tree3, err3 := crypto.BuildMerkleTree([]string{leafA, leafB, leafC})
+	tree4, err4 := crypto.BuildMerkleTree([]string{leafA, leafB, leafC, leafC})
+	if err3 != nil || err4 != nil {
+		t.Fatalf("[SEC-04] Failed to build trees: %v, %v", err3, err4)
+	}
+	if tree3.RootHex() == tree4.RootHex() {
+		t.Fatalf("[SEC-04] SECURITY VIOLATION: Merkle root collision between 3-chunk and 4-chunk trees! Root: %s", tree3.RootHex())
+	}
+
+	// 4. SEC-09: PowerShell installer MUST contain SHA256 checksum verification
+	reqPS := httptest.NewRequest("GET", "/install.ps1", nil)
+	wPS := httptest.NewRecorder()
+	handler.ServeHTTP(wPS, reqPS)
+	psScript := wPS.Body.String()
+	if !bytes.Contains([]byte(psScript), []byte("Get-FileHash")) || !bytes.Contains([]byte(psScript), []byte("SHA256")) {
+		t.Fatalf("[SEC-09] SECURITY VIOLATION: install.ps1 lacks SHA256 verification!")
+	}
+
+	// 5. SEC-10: File download endpoints MUST include nosniff & DENY headers
+	fileRec := &storage.Record{
+		DataID:        "file-doc-002",
+		Collection:    "files",
+		FileName:      "payload.html",
+		FileChunkHash: leafA,
+	}
+	_, _ = store.CreateRecord(fileRec, []byte("<html><script>alert(1)</script></html>"), nil)
+	reqFile := httptest.NewRequest("GET", "/api/files/default/file-doc-002/payload.html", nil)
+	wFile := httptest.NewRecorder()
+	handler.ServeHTTP(wFile, reqFile)
+	if wFile.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("[SEC-10] Missing X-Content-Type-Options: nosniff header on file download!")
+	}
+	if wFile.Header().Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("[SEC-10] Missing X-Frame-Options: DENY header on file download!")
+	}
+}

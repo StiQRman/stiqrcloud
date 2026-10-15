@@ -586,6 +586,8 @@ func (s *Store) DeleteRecord(dataID string, callerPubKey string, signature strin
 			!crypto.VerifyHybridSignature(toSign2, callerPubKey, signature) {
 			return errors.New("unauthorized: invalid signature for record deletion")
 		}
+	} else if callerPubKey != "" {
+		return errors.New("unauthorized: cannot delete unowned record with claimed caller public key")
 	}
 
 	if !isValidDataID(dataID) {
