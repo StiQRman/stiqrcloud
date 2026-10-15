@@ -57,7 +57,7 @@ Any node operator can start a StiQRcloud node in seconds with zero configuration
 ```bash
 curl -sSL https://stiqrcloud.stiqrnotes.com/install.sh | bash
 ```
-*(Or from local network: `curl -sSL http://192.168.1.50:8100/install.sh | bash`)*
+*(Or from local network: `curl -sSL http://<node-ip>:8100/install.sh | bash`)*
 
 #### Windows (PowerShell):
 ```powershell

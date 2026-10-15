@@ -15,7 +15,7 @@ describe('NodeManager', () => {
 
     manager.addNode({
       id: 'my-pi-gateway',
-      url: 'http://192.168.1.50:8100',
+      url: 'http://192.168.1.150:8100',
       name: 'Raspberry Pi Node',
     });
 
@@ -26,7 +26,7 @@ describe('NodeManager', () => {
 
     const piNode = manager.getNode('my-pi-gateway');
     assert.ok(piNode !== undefined);
-    assert.equal(piNode?.url, 'http://192.168.1.50:8100');
+    assert.equal(piNode?.url, 'http://192.168.1.150:8100');
   });
 
   it('should allow switching primary node dynamically', () => {

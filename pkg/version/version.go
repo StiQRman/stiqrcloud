@@ -50,7 +50,7 @@ var DefaultHistory = []Release{
 			"PocketBase-style dashboard UI with Collections sidebar, dynamic schema fields, and lockbox visualizer",
 		},
 		DownloadURL: "https://github.com/stiqrhub/stiqrcloud/releases/tag/v0.2.0",
-		ChecksumSHA: "297dce0408faa819ceac7c9e4e707aa911e1930c8c2173c4503858dc883673cd",
+		ChecksumSHA: "007e8425d8b0c27dd19e4f6665a018bb6885c690e3340eaefe80456ff4927262",
 		IsMandatory: false,
 	},
 	{

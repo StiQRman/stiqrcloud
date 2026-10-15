@@ -388,9 +388,9 @@
   - **Release v0.2.0 Tagged & Archived**:
     - Bumped semantic versioning to `v0.2.0` in [`pkg/version/version.go`](pkg/version/version.go), [`releases/version.json`](releases/version.json), and [`README.md`](README.md).
     - Cross-compiled release binaries and generated cryptographic checksums in [`releases/v0.2.0/`](releases/v0.2.0):
-      - Linux ARM64 (Raspberry Pi): `releases/v0.2.0/stiqrcloud-linux-arm64` (`d3cdefb28173fc1dd3af6f2b1b5724c4650214f7f36eb16259e852d59be0366b`)
-      - Linux amd64: `releases/v0.2.0/stiqrcloud-linux-amd64` (`e2a33d07c30ac21fddae610685cf584e214120f500e46ff9f7155ecaf40da06f`)
-      - Windows amd64: `releases/v0.2.0/stiqrcloud-windows-amd64.exe` (`de66192feca5949cb5012607895ab5e0e16d057693cb216ae1babd88544c7dac`)
+      - Linux ARM64 (Raspberry Pi): `releases/v0.2.0/stiqrcloud-linux-arm64` (`007e8425d8b0c27dd19e4f6665a018bb6885c690e3340eaefe80456ff4927262`)
+      - Linux amd64: `releases/v0.2.0/stiqrcloud-linux-amd64` (`f8eedae5f6278c4c999f6de588b4ce19072393809629c258f001045d13999872`)
+      - Windows amd64: `releases/v0.2.0/stiqrcloud-windows-amd64.exe` (`d5ed2ea36d1d9f3f1093cd0c42e9647818a4edd70a5bba77c4390af1b7ba236b`)
   - **Live Deployment to Raspberry Pi Server (`192.168.1.50`)**:
     - Backed up previous production binary on Pi (`stiqrcloud.v0.1.0.bak`).
     - Deployed new ARM64 binary via `scp` to `/opt/stiqrcloud/stiqrcloud`.

@@ -16,7 +16,7 @@
       "Data owner designation of custom storage node RNode addresses or random auto-quorum selection"
     ],
     "download_url": "https://github.com/stiqrhub/stiqrcloud/releases/tag/v0.2.0",
-    "checksum_sha": "1993e00d7af11f7079d8ad986b50629a850299cad29970e5b3c641c4011fbd7f",
+    "checksum_sha": "007e8425d8b0c27dd19e4f6665a018bb6885c690e3340eaefe80456ff4927262",
     "is_mandatory": false
   },
   {

@@ -9,7 +9,7 @@ import 'models.dart';
 ///
 /// Example:
 /// ```dart
-/// final client = StiQRcloudClient(baseUrl: 'http://192.168.1.50:8100');
+/// final client = StiQRcloudClient(baseUrl: 'http://localhost:8100');
 /// final record = await client.collection('notes').create({
 ///   'title': 'My First Decentralized Note',
 ///   'body': 'Encrypted end-to-end!',

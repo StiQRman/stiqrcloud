@@ -19,7 +19,7 @@ graph TD
         CF["Cloudflare Tunnel Edge<br/>stiqrcloud.stiqrnotes.com"]
     end
 
-    subgraph Home_LAN [Home Network (10.0.0.0/24)]
+    subgraph Home_LAN [Home Network (192.168.1.0/24)]
         Pi["Raspberry Pi Server (192.168.1.50)<br/>stiqrcloud.service (Port 8100)<br/>Discovery Rendezvous & Public Gateway"]
         WS["Workstation PC (192.168.1.100)<br/>6-Node Multi-Region Quorum Cluster<br/>Alice, Bob, Charlie, Daiki, Elena, Finn"]
     end
@@ -55,7 +55,7 @@ curl -sSL https://stiqrcloud.stiqrnotes.com/download/stiqrcloud -o stiqrcloud &&
 
 ## 3. Raspberry Pi Server Configuration
 
-- **Host**: `192.168.1.50` (`node-operator@192.168.1.50`, user `stiqr`)
+- **Host**: `192.168.1.50` (`node-operator@192.168.1.50`, user `stiqrcloud`)
 - **Systemd Service**: `/etc/systemd/system/stiqrcloud.service`
 - **Application Directory**: `/opt/stiqrcloud`
 - **Binary**: `/opt/stiqrcloud/stiqrcloud` (Linux ARM64 static binary)
@@ -70,7 +70,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=stiqr
+User=stiqrcloud
 WorkingDirectory=/opt/stiqrcloud
 ExecStart=/opt/stiqrcloud/stiqrcloud \
   -port 8100 \

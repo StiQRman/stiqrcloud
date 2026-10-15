@@ -2301,12 +2301,30 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		filepath.Join("releases", filename),
 		filepath.Join("releases", "v0.2.0", filename),
 		filepath.Join("releases_storage", filename),
-		filepath.Join("/opt/stiqrhub/releases_storage", filename),
-		filepath.Join("/opt/stiqrcloud", filename),
-		filepath.Join("./stiqrcloud", filename),
-		filepath.Join("./stiqrcloud/releases/v0.2.0", filename),
-		filepath.Join("./testcloud", filename),
-		filepath.Join("./StiQRhub/releases_storage", filename),
+		filepath.Join("..", "releases_storage", filename),
+		filepath.Join("..", "StiQRhub", "releases_storage", filename),
+	}
+
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		searchPaths = append(searchPaths,
+			filepath.Join(exeDir, filename),
+			filepath.Join(exeDir, "releases", filename),
+			filepath.Join(exeDir, "releases", "v0.2.0", filename),
+			filepath.Join(exeDir, "releases_storage", filename),
+			filepath.Join(exeDir, "..", "releases_storage", filename),
+			filepath.Join(exeDir, "..", "StiQRhub", "releases_storage", filename),
+		)
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		searchPaths = append(searchPaths,
+			filepath.Join(home, "StiQRhub", "releases_storage", filename),
+			filepath.Join(home, "StiQRcloud", filename),
+			filepath.Join(home, "Apps", "stiqrcloud", filename),
+			filepath.Join(home, "Apps", "stiqrcloud", "releases", "v0.2.0", filename),
+			filepath.Join(home, "Apps", "StiQRhub", "releases_storage", filename),
+		)
 	}
 
 	var foundPath string

@@ -21,7 +21,7 @@ import RNS
 import LXMF
 
 # Paths & Settings
-APP_DIR = "./stiqrcloud"
+APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(APP_DIR, "data")
 STORAGE_PATH = os.path.join(DATA_DIR, "lxmf_storage")
 IDENTITY_PATH = os.path.join(DATA_DIR, "lxmf_identity")
