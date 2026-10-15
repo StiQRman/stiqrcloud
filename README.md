@@ -50,17 +50,35 @@
 
 ## Quick Start
 
-### Running Locally (Standalone Mode)
+### 🚀 One-Line Automated Node Deployment
+Any node operator can start a StiQRcloud node in seconds with zero configuration or port forwarding:
+
+#### Linux / Raspberry Pi / macOS / Windows WSL:
+```bash
+curl -sSL https://stiqrcloud.stiqrnotes.com/install.sh | bash
+```
+*(Or from local network: `curl -sSL http://192.168.1.50:8100/install.sh | bash`)*
+
+#### Windows (PowerShell):
+```powershell
+iwr -useb https://stiqrcloud.stiqrnotes.com/install.ps1 | iex
+```
+
+---
+
+### Running Precompiled Binaries Manually
+
+#### Running in P2P Mesh Mode with Reticulum & Discovery Rendezvous
+```bash
+./stiqrcloud -port 8100 -dashboard-port 8101 -discovery-url "https://stiqrcloud.stiqrnotes.com" -name "MyNode"
+```
+
+#### Running Locally (Standalone Mode - Offline Zero-Network)
 ```bash
 ./stiqrcloud -standalone -port 8101 -data-dir ./data
 ```
 
-### Running in P2P Mesh Mode with Reticulum
-```bash
-./stiqrcloud -port 8101 -rns-port 4242 -data-dir ./data
-```
-
-Access the local dashboard at:
+Access your private local operator dashboard at:
 👉 **`http://localhost:8101/dashboard`**
 
 ---
@@ -68,7 +86,7 @@ Access the local dashboard at:
 ## Settings Update Card & Version Management
 
 Adhering strictly to **Semantic Versioning (`vMAJOR.MINOR.PATCH`)**:
-- Current Version: `v0.1.0`
+- Current Version: `v0.2.0`
 - The built-in dashboard includes a dedicated **Settings & Updates** card that checks version status, queries release history, displays changelogs, and supports direct downloads.
 
 ---
