@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -108,8 +109,9 @@ func TestStandaloneDatabaseCRUDAndInvariantDataID(t *testing.T) {
 		t.Fatalf("ListRecords failed: total %d", total)
 	}
 
-	// 6. Delete
-	if err := store.DeleteRecord(originalDataID, ownerKP.PublicKey, ""); err != nil {
+	// 6. Delete with cryptographic signature
+	delSig, _ := crypto.SignPayload([]byte(fmt.Sprintf("delete:%s", originalDataID)), ownerKP.PrivateKey)
+	if err := store.DeleteRecord(originalDataID, ownerKP.PublicKey, delSig); err != nil {
 		t.Fatalf("DeleteRecord failed: %v", err)
 	}
 
@@ -188,5 +190,67 @@ func TestExpiredContractEvictionWhenStorageFull(t *testing.T) {
 	_, err = store.GetChunk(rec1.FileChunkHash)
 	if err == nil {
 		t.Fatalf("Expected expired chunk to be evicted when storage reached quota")
+	}
+}
+
+func TestSecurityProtections(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "stiqrcloud_sec_*")
+	if err != nil {
+		t.Fatalf("MkdirTemp failed: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	store, err := NewStore(tempDir)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+
+	// 1. Path traversal in CreateRecord data_id MUST FAIL
+	traversalRec := &Record{
+		DataID:     "../../escaped_sec_test",
+		Collection: "notes",
+		Text:       "malicious",
+	}
+	if _, err := store.CreateRecord(traversalRec, nil, nil); err == nil {
+		t.Fatalf("Expected CreateRecord with traversal data_id to fail")
+	}
+
+	// 2. Unauthenticated delete of owned record MUST FAIL
+	ownerKP, _ := crypto.GenerateKeypair()
+	validRec := &Record{
+		DataID:         "sec_doc_1",
+		Collection:     "notes",
+		UserPubAddress: ownerKP.PublicKey,
+		Text:           "important data",
+	}
+	if _, err := store.CreateRecord(validRec, nil, nil); err != nil {
+		t.Fatalf("Failed to create validRec: %v", err)
+	}
+
+	// Deletion with empty signature must be rejected
+	if err := store.DeleteRecord("sec_doc_1", ownerKP.PublicKey, ""); err == nil {
+		t.Fatalf("Expected DeleteRecord with empty signature to fail")
+	}
+
+	// 3. Unauthenticated update of Secp256k1-owned record MUST FAIL
+	secp256k1Pub := "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	secpRec := &Record{
+		DataID:         "sec_doc_secp",
+		Collection:     "notes",
+		UserPubAddress: secp256k1Pub,
+		Text:           "initial text",
+	}
+	if _, err := store.CreateRecord(secpRec, nil, nil); err != nil {
+		t.Fatalf("Failed to create secpRec: %v", err)
+	}
+
+	// Updating with empty signature must fail
+	if _, err := store.UpdateRecord("sec_doc_secp", secp256k1Pub, "", "hacked", nil, nil); err == nil {
+		t.Fatalf("Expected UpdateRecord with empty signature on Secp256k1 pubkey to fail")
+	}
+
+	// 4. Path traversal in GetChunk MUST FAIL
+	if _, err := store.GetChunk("../records/index.json"); err == nil {
+		t.Fatalf("Expected GetChunk with traversal hash to fail")
 	}
 }

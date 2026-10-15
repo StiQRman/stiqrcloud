@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -217,6 +219,61 @@ func (s *Swarm) AddBootstrapPeer(addr string) {
 	s.bootstrapPeers = append(s.bootstrapPeers, addr)
 }
 
+const MaxPeers = 500
+
+func isValidPeerAddress(addr string) bool {
+	if addr == "" {
+		return true
+	}
+	u, err := url.Parse(addr)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "" {
+		return false
+	}
+	if host == "169.254.169.254" || host == "metadata.google.internal" || strings.HasPrefix(host, "169.254.") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Swarm) evictStalePeerLocked() {
+	if len(s.peers) < MaxPeers {
+		return
+	}
+	var oldestID string
+	var oldestTime time.Time
+	foundOffline := false
+
+	for id, peer := range s.peers {
+		if !peer.IsOnline {
+			if !foundOffline || peer.LastSeen.Before(oldestTime) {
+				foundOffline = true
+				oldestTime = peer.LastSeen
+				oldestID = id
+			}
+		} else if !foundOffline {
+			if oldestTime.IsZero() || peer.LastSeen.Before(oldestTime) {
+				oldestTime = peer.LastSeen
+				oldestID = id
+			}
+		}
+	}
+	if oldestID != "" {
+		delete(s.peers, oldestID)
+	}
+}
+
 // RegisterDirectPeer registers or updates a peer that has contacted us directly
 // (e.g. through discovery announcement or direct peer greeting).
 func (s *Swarm) RegisterDirectPeer(p *Peer) {
@@ -225,6 +282,11 @@ func (s *Swarm) RegisterDirectPeer(p *Peer) {
 
 	if p.NodeID == "" || p.NodeID == s.localID {
 		return
+	}
+
+	// Filter out invalid/SSRF targets
+	if !isValidPeerAddress(p.PublicAddr) {
+		p.PublicAddr = ""
 	}
 
 	// Never accept 0.0.0.0 or self-loopback as a peer's public address
@@ -262,6 +324,7 @@ func (s *Swarm) RegisterDirectPeer(p *Peer) {
 		return
 	}
 
+	s.evictStalePeerLocked()
 	p.IsOnline = true
 	p.LastSeen = time.Now().UTC()
 	s.calculateSocialScore(p)
@@ -275,6 +338,11 @@ func (s *Swarm) RegisterPeer(p *Peer) {
 
 	if p.NodeID == "" || p.NodeID == s.localID {
 		return
+	}
+
+	// Filter out invalid/SSRF targets
+	if !isValidPeerAddress(p.PublicAddr) {
+		p.PublicAddr = ""
 	}
 
 	// Never accept 0.0.0.0 or self-loopback as a peer's public address
@@ -314,6 +382,7 @@ func (s *Swarm) RegisterPeer(p *Peer) {
 		return
 	}
 
+	s.evictStalePeerLocked()
 	// For a new peer learned passively via gossip:
 	// If it has an address and IsOnline was not explicitly asserted, mark offline until ProbePeers verifies reachability directly.
 	if !p.IsOnline {

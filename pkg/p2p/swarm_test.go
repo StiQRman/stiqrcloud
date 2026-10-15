@@ -199,3 +199,41 @@ func TestSelectQuorumForUserAffinityAndAdaptation(t *testing.T) {
 		t.Fatalf("Expected recovered node %s to resume affinity spot, got %v", failedNode, storageRecovered)
 	}
 }
+
+func TestSwarmSecurityProtections(t *testing.T) {
+	tempDir, _ := os.MkdirTemp("", "stiqrcloud_swarm_sec_*")
+	defer os.RemoveAll(tempDir)
+	store, _ := storage.NewStore(tempDir)
+
+	swarm := NewSwarm("sec_node", "http://127.0.0.1:8100", store)
+
+	// 1. SSRF via cloud metadata IP MUST BE REJECTED
+	ssrfPeer := &Peer{
+		NodeID:     "attacker_node",
+		PublicAddr: "http://169.254.169.254/latest/meta-data/",
+	}
+	swarm.RegisterDirectPeer(ssrfPeer)
+	p, ok := swarm.GetPeer("attacker_node")
+	if !ok {
+		t.Fatalf("Peer should be registered in table")
+	}
+	if p.PublicAddr != "" {
+		t.Fatalf("Expected cloud metadata SSRF address to be stripped, got %q", p.PublicAddr)
+	}
+
+	// 2. Sybil flooding: table MUST be capped at MaxPeers
+	for i := 0; i < MaxPeers+50; i++ {
+		swarm.RegisterPeer(&Peer{
+			NodeID:     fmt.Sprintf("sybil_%d", i),
+			PublicAddr: fmt.Sprintf("http://10.10.10.%d:8100", (i%250)+1),
+			IsOnline:   false,
+			LastSeen:   time.Now().Add(-time.Duration(MaxPeers-i) * time.Minute),
+		})
+	}
+
+	peers := swarm.ListPeers()
+	if len(peers) > MaxPeers {
+		t.Fatalf("Expected peers count to be capped at %d, got %d", MaxPeers, len(peers))
+	}
+}
+

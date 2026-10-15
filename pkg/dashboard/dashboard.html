@@ -1031,6 +1031,16 @@
   </div>
 
   <script>
+    function escapeHTML(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
     let currentRnsDest = '';
     let currentCollection = 'notes';
     let collectionsList = [];
@@ -1070,17 +1080,19 @@
         container.innerHTML = collectionsList.map(c => {
           const isActive = c.name === currentCollection;
           const icon = c.name.includes('file') ? '📁' : (c.name.includes('note') ? '📝' : (c.name.includes('sec') ? '🔒' : '📦'));
+          const safeName = escapeHTML(c.name);
           return `
-            <div class="nav-item ${isActive ? 'active' : ''}" onclick="selectCollection('${c.name}')">
-              <span class="nav-item-name">${icon} ${c.name}</span>
-              <span class="pill-count">${c.record_count}</span>
+            <div class="nav-item ${isActive ? 'active' : ''}" onclick="selectCollection('${safeName}')">
+              <span class="nav-item-name">${icon} ${safeName}</span>
+              <span class="pill-count">${Number(c.record_count) || 0}</span>
             </div>
           `;
         }).join('');
 
-        select.innerHTML = collectionsList.map(c => `
-          <option value="${c.name}" ${c.name === currentCollection ? 'selected' : ''}>${c.name}</option>
-        `).join('');
+        select.innerHTML = collectionsList.map(c => {
+          const safeName = escapeHTML(c.name);
+          return `<option value="${safeName}" ${c.name === currentCollection ? 'selected' : ''}>${safeName}</option>`;
+        }).join('');
 
         renderFieldsBar();
       } catch (e) {
@@ -1143,8 +1155,8 @@
       const container = document.getElementById('fields-chips-container');
       container.innerHTML = fields.map(f => `
         <div class="field-chip">
-          <span class="field-chip-name">${f.name}</span>
-          <span class="field-chip-type">${f.type}</span>
+          <span class="field-chip-name">${escapeHTML(f.name)}</span>
+          <span class="field-chip-type">${escapeHTML(f.type)}</span>
         </div>
       `).join('');
     }
@@ -1169,14 +1181,16 @@
     function renderRecordsTable(records) {
       const tbody = document.getElementById('records-table-body');
       if (!records || records.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:30px;">No records in collection "${currentCollection}". Click "+ New Record" to create one.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:30px;">No records in collection "${escapeHTML(currentCollection)}". Click "+ New Record" to create one.</td></tr>`;
         return;
       }
 
       tbody.innerHTML = records.map(r => {
+        const safeDataID = escapeHTML(r.data_id || '');
         const shortID = r.data_id ? (r.data_id.length > 22 ? r.data_id.substring(0, 18) + '...' : r.data_id) : '-';
+        const safeShortID = escapeHTML(shortID);
         const fileDisplay = r.file_name 
-          ? `<a href="/api/records/${r.data_id}/file" target="_blank" style="color:var(--accent);text-decoration:none;">📎 ${r.file_name}</a>` 
+          ? `<a href="/api/records/${encodeURIComponent(r.data_id)}/file" target="_blank" style="color:var(--accent);text-decoration:none;">📎 ${escapeHTML(r.file_name)}</a>` 
           : '<span style="color:var(--text-muted);">-</span>';
         
         const lockboxBadges = (r.lockboxes && r.lockboxes.length > 0)
@@ -1187,20 +1201,21 @@
           ? `<span class="badge badge-success">${r.acl.length} Collaborator(s)</span>`
           : '<span class="badge" style="background:#273549;color:var(--text-muted);">Owner Only</span>';
 
-        const textPreview = r.text ? (r.text.length > 35 ? r.text.substring(0, 32) + '...' : r.text) : '<span style="color:var(--text-muted);">(empty)</span>';
+        const textPreview = r.text ? (r.text.length > 35 ? r.text.substring(0, 32) + '...' : r.text) : '';
+        const safeTextPreview = textPreview ? escapeHTML(textPreview) : '<span style="color:var(--text-muted);">(empty)</span>';
 
         return `
           <tr>
-            <td class="mono" style="font-weight:600;color:var(--accent);cursor:pointer;" title="Click to inspect" onclick="inspectRecord('${r.data_id}')">${shortID}</td>
-            <td><span class="badge badge-primary">v${r.version}</span></td>
-            <td>${textPreview}</td>
+            <td class="mono" style="font-weight:600;color:var(--accent);cursor:pointer;" title="Click to inspect" onclick="inspectRecord('${safeDataID}')">${safeShortID}</td>
+            <td><span class="badge badge-primary">v${Number(r.version) || 1}</span></td>
+            <td>${safeTextPreview}</td>
             <td>${fileDisplay}</td>
             <td>${lockboxBadges}</td>
             <td>${aclBadge}</td>
-            <td>${new Date(r.updated_at).toLocaleString()}</td>
+            <td>${escapeHTML(new Date(r.updated_at).toLocaleString())}</td>
             <td style="text-align:right;">
-              <button class="btn btn-secondary btn-sm" onclick="inspectRecord('${r.data_id}')">Inspect</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteRecordPrompt('${r.data_id}')">Delete</button>
+              <button class="btn btn-secondary btn-sm" onclick="inspectRecord('${safeDataID}')">Inspect</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteRecordPrompt('${safeDataID}')">Delete</button>
             </td>
           </tr>
         `;
@@ -1256,16 +1271,24 @@
         tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:14px;">Owner only (No external collaborators)</td></tr>';
         return;
       }
-      tbody.innerHTML = activeRecord.acl.map(c => `
-        <tr>
-          <td class="mono" style="font-size:0.75rem;">${c.user_pub_key.length > 25 ? c.user_pub_key.substring(0, 22) + '...' : c.user_pub_key}</td>
-          <td><span class="badge ${c.permission === 'edit' ? 'badge-primary' : 'badge-success'}">${c.permission.toUpperCase()}</span></td>
-          <td>${new Date(c.added_at).toLocaleDateString()}</td>
-          <td style="text-align:right;">
-            <button class="btn btn-danger btn-sm" onclick="revokeCollaborator('${c.user_pub_key}')">Revoke</button>
-          </td>
-        </tr>
-      `).join('');
+      tbody.innerHTML = activeRecord.acl.map(c => {
+        const key = c.user_pub_key || '';
+        const shortKey = key.length > 25 ? key.substring(0, 22) + '...' : key;
+        const safeShortKey = escapeHTML(shortKey);
+        const safeFullKey = escapeHTML(key);
+        const safePerm = escapeHTML((c.permission || '').toUpperCase());
+        const permBadgeClass = c.permission === 'edit' ? 'badge-primary' : 'badge-success';
+        return `
+          <tr>
+            <td class="mono" style="font-size:0.75rem;">${safeShortKey}</td>
+            <td><span class="badge ${permBadgeClass}">${safePerm}</span></td>
+            <td>${escapeHTML(new Date(c.added_at).toLocaleDateString())}</td>
+            <td style="text-align:right;">
+              <button class="btn btn-danger btn-sm" onclick="revokeCollaborator('${safeFullKey}')">Revoke</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
     }
 
     function renderModalChunks() {
@@ -1598,17 +1621,23 @@
               ? '<span class="badge badge-success">ONLINE</span>'
               : '<span class="badge badge-danger">OFFLINE</span>';
             const latencyStr = isOnline ? (p.avg_latency_ms > 0 ? p.avg_latency_ms.toFixed(1) + ' ms' : '< 1 ms') : 'Unreachable';
+            const safeName = escapeHTML(p.name || p.node_id);
+            const safeLoc = escapeHTML(p.location || '-');
+            const safeIP = escapeHTML(p.public_ip || '-');
+            const safeAddr = escapeHTML(p.public_addr || p.reticulum_dest || '-');
+            const safeScore = (Number(p.social_score) || 0).toFixed(1);
+            const priceStr = p.price_per_gb_month === 0 ? '<span class="badge badge-success">Free</span>' : (escapeHTML(p.price_per_gb_month) + ' sats');
             return `
               <tr>
                 <td>${statusBadge}</td>
-                <td class="mono"><strong>${p.name || p.node_id}</strong></td>
-                <td>${p.location || '-'}</td>
-                <td class="mono">${p.public_ip || '-'}</td>
-                <td class="mono" style="font-size:0.75rem;">${p.public_addr || p.reticulum_dest || '-'}</td>
+                <td class="mono"><strong>${safeName}</strong></td>
+                <td>${safeLoc}</td>
+                <td class="mono">${safeIP}</td>
+                <td class="mono" style="font-size:0.75rem;">${safeAddr}</td>
                 <td>${p.is_public ? '<span class="badge badge-primary">Public</span>' : '<span class="badge badge-warning">Private</span>'}</td>
-                <td>${p.price_per_gb_month === 0 ? '<span class="badge badge-success">Free</span>' : (p.price_per_gb_month + ' sats')}</td>
-                <td>${latencyStr}</td>
-                <td><strong>${p.social_score.toFixed(1)}</strong></td>
+                <td>${priceStr}</td>
+                <td>${escapeHTML(latencyStr)}</td>
+                <td><strong>${safeScore}</strong></td>
               </tr>
             `;
           }).join('');
@@ -1617,16 +1646,22 @@
         // Audits table
         if (data.recent_audits && data.recent_audits.length > 0) {
           const atbody = document.getElementById('audits-table-body');
-          atbody.innerHTML = data.recent_audits.slice().reverse().map(a => `
-            <tr>
-              <td class="mono" style="font-weight:600;color:var(--accent);">${a.challenge_id}</td>
-              <td class="mono">${a.storage_node}</td>
-              <td>${a.passed ? '<span class="badge badge-success">✓ PASSED</span>' : '<span class="badge badge-danger">✕ FAILED</span>'}</td>
-              <td>${new Date(a.timestamp).toLocaleTimeString()}</td>
-              <td>${a.latency_ms > 0 ? a.latency_ms.toFixed(1) + ' ms' : '-'}</td>
-              <td>${a.notes}</td>
-            </tr>
-          `).join('');
+          atbody.innerHTML = data.recent_audits.slice().reverse().map(a => {
+            const safeChallenge = escapeHTML(a.challenge_id || '');
+            const safeNode = escapeHTML(a.storage_node || '');
+            const safeNotes = escapeHTML(a.notes || '');
+            const latencyStr = a.latency_ms > 0 ? a.latency_ms.toFixed(1) + ' ms' : '-';
+            return `
+              <tr>
+                <td class="mono" style="font-weight:600;color:var(--accent);">${safeChallenge}</td>
+                <td class="mono">${safeNode}</td>
+                <td>${a.passed ? '<span class="badge badge-success">✓ PASSED</span>' : '<span class="badge badge-danger">✕ FAILED</span>'}</td>
+                <td>${escapeHTML(new Date(a.timestamp).toLocaleTimeString())}</td>
+                <td>${escapeHTML(latencyStr)}</td>
+                <td>${safeNotes}</td>
+              </tr>
+            `;
+          }).join('');
         }
       } catch (e) {
         console.error('Failed to load stats:', e);
@@ -1639,12 +1674,15 @@
         container.innerHTML = '<span style="color:var(--text-muted);font-size:0.85rem;">No addresses whitelisted yet.</span>';
         return;
       }
-      container.innerHTML = list.map(addr => `
-        <div class="whitelist-pill mono">
-          <span>${addr}</span>
-          <button class="pill-remove" title="Remove" onclick="removeWhitelistAddress('${addr}')">&times;</button>
-        </div>
-      `).join('');
+      container.innerHTML = list.map(addr => {
+        const safeAddr = escapeHTML(addr);
+        return `
+          <div class="whitelist-pill mono">
+            <span>${safeAddr}</span>
+            <button class="pill-remove" title="Remove" onclick="removeWhitelistAddress('${safeAddr}')">&times;</button>
+          </div>
+        `;
+      }).join('');
     }
 
     async function toggleFreeForAll(checked) {
@@ -1713,12 +1751,15 @@
         container.innerHTML = '<span style="color:var(--text-muted);font-size:0.85rem;">No addresses blacklisted yet. Node is open to all non-abusive clients.</span>';
         return;
       }
-      container.innerHTML = list.map(addr => `
-        <div class="blacklist-pill mono">
-          <span>${addr}</span>
-          <button class="pill-remove" title="Unban / Remove" onclick="removeBlacklistAddress('${addr}')">&times;</button>
-        </div>
-      `).join('');
+      container.innerHTML = list.map(addr => {
+        const safeAddr = escapeHTML(addr);
+        return `
+          <div class="blacklist-pill mono">
+            <span>${safeAddr}</span>
+            <button class="pill-remove" title="Unban / Remove" onclick="removeBlacklistAddress('${safeAddr}')">&times;</button>
+          </div>
+        `;
+      }).join('');
     }
 
     async function addBlacklistAddress() {

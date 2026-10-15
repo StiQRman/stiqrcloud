@@ -176,6 +176,33 @@ func generateDataID() string {
 	return fmt.Sprintf("rec_%s_%d", hex.EncodeToString(b), time.Now().UnixNano()%100000)
 }
 
+func isValidDataID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.') {
+			return false
+		}
+	}
+	if strings.Contains(id, "..") || id == "." {
+		return false
+	}
+	return true
+}
+
+func isValidHexHash(h string) bool {
+	if len(h) < 16 || len(h) > 128 {
+		return false
+	}
+	for _, r := range h {
+		if !((r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
 type evictionCandidate struct {
 	dataID    string
 	expiresAt time.Time
@@ -293,7 +320,13 @@ func (s *Store) PutChunk(data []byte) (string, error) {
 
 // GetChunk retrieves chunk bytes by hash.
 func (s *Store) GetChunk(hash string) ([]byte, error) {
-	chunkPath := filepath.Join(s.chunksDir, hash)
+	if !isValidHexHash(hash) {
+		return nil, fmt.Errorf("invalid chunk hash: %q", hash)
+	}
+	chunkPath := filepath.Clean(filepath.Join(s.chunksDir, hash))
+	if !strings.HasPrefix(chunkPath, filepath.Clean(s.chunksDir)+string(filepath.Separator)) {
+		return nil, fmt.Errorf("security violation: path traversal in chunk hash %q", hash)
+	}
 	data, err := os.ReadFile(chunkPath)
 	if err != nil {
 		return nil, fmt.Errorf("chunk not found: %w", err)
@@ -303,10 +336,13 @@ func (s *Store) GetChunk(hash string) ([]byte, error) {
 
 // HasChunk checks whether a chunk exists on disk without loading it into memory.
 func (s *Store) HasChunk(hash string) bool {
-	if hash == "" {
+	if !isValidHexHash(hash) {
 		return false
 	}
-	chunkPath := filepath.Join(s.chunksDir, hash)
+	chunkPath := filepath.Clean(filepath.Join(s.chunksDir, hash))
+	if !strings.HasPrefix(chunkPath, filepath.Clean(s.chunksDir)+string(filepath.Separator)) {
+		return false
+	}
 	fi, err := os.Stat(chunkPath)
 	return err == nil && !fi.IsDir()
 }
@@ -318,8 +354,13 @@ func (s *Store) CreateRecord(rec *Record, fileData []byte, picData []byte) (*Rec
 
 	if rec.DataID == "" {
 		rec.DataID = generateDataID()
-	} else if _, exists := s.records[rec.DataID]; exists {
-		return nil, fmt.Errorf("record with data_id %q already exists; use UpdateRecord", rec.DataID)
+	} else {
+		if !isValidDataID(rec.DataID) {
+			return nil, fmt.Errorf("invalid data_id: %q contains forbidden characters or path traversal", rec.DataID)
+		}
+		if _, exists := s.records[rec.DataID]; exists {
+			return nil, fmt.Errorf("record with data_id %q already exists; use UpdateRecord", rec.DataID)
+		}
 	}
 
 	if rec.Collection == "" {
@@ -400,30 +441,37 @@ func (s *Store) UpdateRecord(dataID string, updaterPubKey string, signature stri
 	}
 
 	// Enforce signature verification if record has an owner or if signature is supplied
-	if rec.UserPubAddress != "" || signature != "" {
-		if signature != "" {
-			toSign1 := []byte(fmt.Sprintf("%s:%d:%s", dataID, rec.Version+1, newText))
-			toSign2 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version+1))
-			toSign3 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version))
-			toSign4 := []byte(fmt.Sprintf("%s:%d", dataID, rec.Version+1))
-			toSign5 := []byte(fmt.Sprintf("%s:%s", dataID, newText))
-			toSign6 := []byte(fmt.Sprintf("%s:update", dataID))
-			toSign7 := []byte(dataID)
-
-			valid := crypto.VerifyHybridSignature(toSign1, updaterPubKey, signature) ||
-				crypto.VerifyHybridSignature(toSign2, updaterPubKey, signature) ||
-				crypto.VerifyHybridSignature(toSign3, updaterPubKey, signature) ||
-				crypto.VerifyHybridSignature(toSign4, updaterPubKey, signature) ||
-				crypto.VerifyHybridSignature(toSign5, updaterPubKey, signature) ||
-				crypto.VerifyHybridSignature(toSign6, updaterPubKey, signature) ||
-				crypto.VerifyHybridSignature(toSign7, updaterPubKey, signature)
-
-			if !valid {
-				return nil, errors.New("unauthorized: invalid signature for record update")
-			}
-		} else if len(updaterPubKey) == 64 || len(updaterPubKey) == 3904 {
-			// Cryptographic key requires signature
+	if rec.UserPubAddress != "" {
+		if signature == "" {
 			return nil, errors.New("unauthorized: missing cryptographic signature for record update")
+		}
+
+		toSign1 := []byte(fmt.Sprintf("%s:%d:%s", dataID, rec.Version+1, newText))
+		toSign2 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version+1))
+		toSign3 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version))
+		toSign4 := []byte(fmt.Sprintf("%s:%d", dataID, rec.Version+1))
+		toSign5 := []byte(fmt.Sprintf("%s:%s", dataID, newText))
+		toSign6 := []byte(fmt.Sprintf("%s:update", dataID))
+
+		valid := crypto.VerifyHybridSignature(toSign1, updaterPubKey, signature) ||
+			crypto.VerifyHybridSignature(toSign2, updaterPubKey, signature) ||
+			crypto.VerifyHybridSignature(toSign3, updaterPubKey, signature) ||
+			crypto.VerifyHybridSignature(toSign4, updaterPubKey, signature) ||
+			crypto.VerifyHybridSignature(toSign5, updaterPubKey, signature) ||
+			crypto.VerifyHybridSignature(toSign6, updaterPubKey, signature)
+
+		if !valid {
+			return nil, errors.New("unauthorized: invalid signature for record update")
+		}
+	} else if signature != "" {
+		toSign1 := []byte(fmt.Sprintf("%s:%d:%s", dataID, rec.Version+1, newText))
+		toSign4 := []byte(fmt.Sprintf("%s:%d", dataID, rec.Version+1))
+		toSign6 := []byte(fmt.Sprintf("%s:update", dataID))
+		valid := crypto.VerifyHybridSignature(toSign1, updaterPubKey, signature) ||
+			crypto.VerifyHybridSignature(toSign4, updaterPubKey, signature) ||
+			crypto.VerifyHybridSignature(toSign6, updaterPubKey, signature)
+		if !valid {
+			return nil, errors.New("unauthorized: invalid signature for record update")
 		}
 	}
 
@@ -512,19 +560,25 @@ func (s *Store) DeleteRecord(dataID string, callerPubKey string, signature strin
 			return errors.New("unauthorized: caller cannot delete this record")
 		}
 
-		if signature != "" {
-			toSign1 := []byte(fmt.Sprintf("delete:%s", dataID))
-			toSign2 := []byte(fmt.Sprintf("%s:delete", dataID))
-			toSign3 := []byte(dataID)
-			if !crypto.VerifyHybridSignature(toSign1, callerPubKey, signature) &&
-				!crypto.VerifyHybridSignature(toSign2, callerPubKey, signature) &&
-				!crypto.VerifyHybridSignature(toSign3, callerPubKey, signature) {
-				return errors.New("unauthorized: invalid signature for record deletion")
-			}
+		if signature == "" {
+			return errors.New("unauthorized: missing cryptographic signature for record deletion")
+		}
+
+		toSign1 := []byte(fmt.Sprintf("delete:%s", dataID))
+		toSign2 := []byte(fmt.Sprintf("%s:delete", dataID))
+		if !crypto.VerifyHybridSignature(toSign1, callerPubKey, signature) &&
+			!crypto.VerifyHybridSignature(toSign2, callerPubKey, signature) {
+			return errors.New("unauthorized: invalid signature for record deletion")
 		}
 	}
 
-	path := filepath.Join(s.recordsDir, dataID+".json")
+	if !isValidDataID(dataID) {
+		return fmt.Errorf("invalid data_id: %q", dataID)
+	}
+	path := filepath.Clean(filepath.Join(s.recordsDir, dataID+".json"))
+	if !strings.HasPrefix(path, filepath.Clean(s.recordsDir)+string(filepath.Separator)) {
+		return fmt.Errorf("security violation: path traversal in data_id %q", dataID)
+	}
 	_ = os.Remove(path)
 	delete(s.records, dataID)
 	return nil
@@ -1001,11 +1055,17 @@ func (s *Store) saveSchemaFileLocked() error {
 }
 
 func (s *Store) saveRecordDisk(rec *Record) error {
+	if !isValidDataID(rec.DataID) {
+		return fmt.Errorf("invalid data_id: %q contains forbidden characters or path traversal", rec.DataID)
+	}
+	path := filepath.Clean(filepath.Join(s.recordsDir, rec.DataID+".json"))
+	if !strings.HasPrefix(path, filepath.Clean(s.recordsDir)+string(filepath.Separator)) {
+		return fmt.Errorf("security violation: path traversal detected for data_id %q", rec.DataID)
+	}
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(s.recordsDir, rec.DataID+".json")
 	return os.WriteFile(path, data, 0644)
 }
 
@@ -1024,8 +1084,8 @@ func (s *Store) UpsertReplicatedRecord(rec *Record, fileData, picData []byte) (*
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if rec == nil || rec.DataID == "" {
-		return nil, errors.New("empty data_id in replicated record")
+	if rec == nil || rec.DataID == "" || !isValidDataID(rec.DataID) {
+		return nil, errors.New("empty or invalid data_id in replicated record")
 	}
 
 	if len(fileData) > 0 {

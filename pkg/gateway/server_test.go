@@ -3,12 +3,15 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stiqrhub/stiqrcloud/pkg/audit"
+	"github.com/stiqrhub/stiqrcloud/pkg/crypto"
 	"github.com/stiqrhub/stiqrcloud/pkg/escrow"
 	"github.com/stiqrhub/stiqrcloud/pkg/p2p"
 	"github.com/stiqrhub/stiqrcloud/pkg/reticulum"
@@ -52,7 +55,8 @@ func TestGatewayAPIEndpointsAndInvariantDataID(t *testing.T) {
 	}
 
 	// 2. Create Record
-	payload := `{"collection":"notes","user_pub_address":"pubkey_alice","text":"Hello stiqrcloud database"}`
+	aliceKP, _ := crypto.GenerateKeypair()
+	payload := fmt.Sprintf(`{"collection":"notes","user_pub_address":%q,"text":"Hello stiqrcloud database"}`, aliceKP.PublicKey)
 	req = httptest.NewRequest("POST", "/api/records", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
@@ -69,8 +73,10 @@ func TestGatewayAPIEndpointsAndInvariantDataID(t *testing.T) {
 		t.Fatalf("Expected valid data_id in response")
 	}
 
-	// 3. Update Record - Invariant Data ID Check
-	updatePayload := `{"updater_pub_key":"pubkey_alice","text":"Updated content text"}`
+	// 3. Update Record - Invariant Data ID Check with Signed Payload
+	newText := "Updated content text"
+	sig, _ := crypto.SignPayload([]byte(fmt.Sprintf("%s:2:%s", createdDataID, newText)), aliceKP.PrivateKey)
+	updatePayload := fmt.Sprintf(`{"updater_pub_key":%q,"signature":%q,"text":%q}`, aliceKP.PublicKey, sig, newText)
 	req = httptest.NewRequest("PATCH", "/api/records/"+createdDataID, bytes.NewBufferString(updatePayload))
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
@@ -469,6 +475,83 @@ func TestStoragePoliciesAndUserControl(t *testing.T) {
 	}
 	if sp, ok := pbResp["storage_peers"].([]interface{}); ok && len(sp) > 0 {
 		t.Fatalf("Expected 0 storage peers for PB local policy, got %v", sp)
+	}
+}
+
+func TestGatewaySecurityHardening(t *testing.T) {
+	tempDir, _ := os.MkdirTemp("", "stiqrcloud_sec_*")
+	defer os.RemoveAll(tempDir)
+
+	store, _ := storage.NewStore(tempDir)
+	escrowMgr := escrow.NewManager("node_test", 100)
+	swarm := p2p.NewSwarm("node_test", "http://127.0.0.1:8100", store)
+	auditor := audit.NewCoordinator("node_test", store, escrowMgr, swarm)
+
+	srv := NewServer(Config{
+		NodeID:     "node_test",
+		Store:      store,
+		Swarm:      swarm,
+		EscrowMgr:  escrowMgr,
+		Auditor:    auditor,
+		Standalone: true,
+	})
+	handler := srv.Handler()
+
+	// 1. Arbitrary file read / source code leak via /download/ MUST BE BLOCKED
+	req := httptest.NewRequest("GET", "/download/pkg/gateway/server.go", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden && rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected /download/ of source code to be blocked with 403 or 400, got %d", rec.Code)
+	}
+
+	// 2. Arbitrary non-release files or traversal names via /download/ MUST BE BLOCKED
+	req = httptest.NewRequest("GET", "/download/passwd", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden && rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected non-release /download/ to be blocked, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest("GET", "/download/stiqrcloud..foo", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden && rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected dot-dot /download/ to be blocked, got %d", rec.Code)
+	}
+
+	// 3. Host header command injection in /install.sh MUST BE SANITIZED
+	req = httptest.NewRequest("GET", "/install.sh", nil)
+	req.Host = "example.com\"; rm -rf /; echo \""
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Failed to retrieve install.sh: %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "rm -rf") {
+		t.Fatalf("CRITICAL: Host header command injection succeeded in install.sh!")
+	}
+	if !strings.Contains(body, "127.0.0.1:8100") {
+		t.Fatalf("Expected sanitized fallback host 127.0.0.1:8100 in install.sh")
+	}
+
+	// 4. Admin CORS Protection: Cross-origin browser requests to /api/escrow/policy MUST BE FORBIDDEN
+	req = httptest.NewRequest("GET", "/api/escrow/policy", nil)
+	req.Header.Set("Origin", "http://evil-attacker-site.com")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("Expected cross-origin admin request to be rejected with 403 Forbidden, got %d", rec.Code)
+	}
+
+	// 5. Unauthenticated bulk sync dump (?all=true) from external WAN MUST BE FORBIDDEN
+	req = httptest.NewRequest("GET", "/api/sync/records?all=true", nil)
+	req.RemoteAddr = "203.0.113.195:12345"
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("Expected public WAN bulk sync to be rejected with 403 Forbidden, got %d", rec.Code)
 	}
 }
 

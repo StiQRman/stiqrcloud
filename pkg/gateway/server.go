@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -135,13 +136,37 @@ func NewServer(cfg Config) *Server {
 	return s
 }
 
+func isLocalAdminPath(path string) bool {
+	return path == "/dashboard" ||
+		strings.HasPrefix(path, "/dashboard/") ||
+		strings.HasPrefix(path, "/api/dashboard/") ||
+		strings.HasPrefix(path, "/api/escrow/") ||
+		strings.HasPrefix(path, "/api/audit/") ||
+		strings.HasPrefix(path, "/api/storage/quota")
+}
+
 // Handler returns the HTTP handler with CORS support.
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
-		w.Header().Set("Access-Control-Expose-Headers", "*")
+		isAdmin := isLocalAdminPath(r.URL.Path)
+		if isAdmin {
+			origin := r.Header.Get("Origin")
+			if origin != "" {
+				originURL, err := url.Parse(origin)
+				if err != nil || (!strings.EqualFold(originURL.Host, r.Host) && originURL.Hostname() != "localhost" && originURL.Hostname() != "127.0.0.1") {
+					http.Error(w, "Forbidden: cross-origin access to administrative dashboard/escrow endpoints is blocked", http.StatusForbidden)
+					return
+				}
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "*")
+			w.Header().Set("Access-Control-Expose-Headers", "*")
+		}
+
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -229,7 +254,7 @@ func (s *Server) setupRoutes() {
 				// Transparently decompress if gzip magic header detected
 				if len(payload) > 2 && payload[0] == 0x1f && payload[1] == 0x8b {
 					if gz, err := gzip.NewReader(bytes.NewReader(payload)); err == nil {
-						if decompressed, err := io.ReadAll(gz); err == nil {
+						if decompressed, err := io.ReadAll(io.LimitReader(gz, 10<<20)); err == nil {
 							payload = decompressed
 						}
 						_ = gz.Close()
@@ -441,6 +466,7 @@ func (s *Server) handleInternalStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
@@ -505,6 +531,13 @@ func (s *Server) handleSyncRecords(w http.ResponseWriter, r *http.Request) {
 	peerID := r.URL.Query().Get("peer_id")
 	sinceStr := r.URL.Query().Get("since")
 	all := r.URL.Query().Get("all") == "true"
+
+	// Security: bulk dump with all=true or omitted peer_id is restricted to local administrative callers
+	if (all || peerID == "") && !s.isLocalRequest(r) {
+		http.Error(w, "Forbidden: bulk record sync is restricted to local requests or assigned peer identity", http.StatusForbidden)
+		return
+	}
+
 	limit := 200
 	if lStr := r.URL.Query().Get("limit"); lStr != "" {
 		if parsed, err := strconv.Atoi(lStr); err == nil && parsed > 0 {
@@ -860,6 +893,7 @@ func (s *Server) handleRecordsRoot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 	// Parse multipart or JSON
 	var text, userPubKey, sig, collection, dataID, repPolicy string
 	var customStoragePeers []string
@@ -1265,6 +1299,7 @@ func formatPBRecord(rec *storage.Record) map[string]interface{} {
 }
 
 func (s *Server) handleCreatePBRecord(w http.ResponseWriter, r *http.Request, collection string) {
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 	var text, userPubKey, sig, dataID string
 	var fileBytes, picBytes []byte
 	var fileName, picName string
@@ -2287,6 +2322,17 @@ func (s *Server) handleReticulumStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+var validReleasePattern = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
+var hostPattern = regexp.MustCompile(`^[a-zA-Z0-9.-]+(:[0-9]{1,5})?$`)
+
+func sanitizeHost(rawHost string) string {
+	rawHost = strings.TrimSpace(rawHost)
+	if !hostPattern.MatchString(rawHost) {
+		return "127.0.0.1:8100"
+	}
+	return rawHost
+}
+
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	filename := strings.TrimPrefix(r.URL.Path, "/download/")
 	filename = strings.Trim(filename, "/")
@@ -2294,43 +2340,45 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		filename = "stiqrcloud-linux-amd64"
 	}
 
-	// Search locations for the requested binary
+	// Sanitize to strictly base name, prevent directory traversal
+	filename = filepath.Base(filename)
+
+	// Validate filename pattern
+	if !validReleasePattern.MatchString(filename) || strings.Contains(filename, "..") {
+		http.Error(w, "invalid binary filename", http.StatusBadRequest)
+		return
+	}
+
+	// Only allow binary downloads matching legitimate release formats
+	if !strings.HasPrefix(filename, "stiqrcloud") &&
+		filename != "checksums.txt" &&
+		filename != "install.sh" &&
+		filename != "install.ps1" {
+		http.Error(w, "requested file is not an authorized release asset", http.StatusForbidden)
+		return
+	}
+
+	// Search ONLY in designated release folders
 	searchPaths := []string{
-		filename,
-		filepath.Join(".", filename),
 		filepath.Join("releases", filename),
 		filepath.Join("releases", "v0.2.0", filename),
 		filepath.Join("releases_storage", filename),
-		filepath.Join("..", "releases_storage", filename),
-		filepath.Join("..", "StiQRhub", "releases_storage", filename),
 	}
 
 	if exePath, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exePath)
 		searchPaths = append(searchPaths,
-			filepath.Join(exeDir, filename),
 			filepath.Join(exeDir, "releases", filename),
 			filepath.Join(exeDir, "releases", "v0.2.0", filename),
 			filepath.Join(exeDir, "releases_storage", filename),
-			filepath.Join(exeDir, "..", "releases_storage", filename),
-			filepath.Join(exeDir, "..", "StiQRhub", "releases_storage", filename),
-		)
-	}
-
-	if home, err := os.UserHomeDir(); err == nil {
-		searchPaths = append(searchPaths,
-			filepath.Join(home, "StiQRhub", "releases_storage", filename),
-			filepath.Join(home, "StiQRcloud", filename),
-			filepath.Join(home, "Apps", "stiqrcloud", filename),
-			filepath.Join(home, "Apps", "stiqrcloud", "releases", "v0.2.0", filename),
-			filepath.Join(home, "Apps", "StiQRhub", "releases_storage", filename),
 		)
 	}
 
 	var foundPath string
 	for _, p := range searchPaths {
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			foundPath = p
+		clean := filepath.Clean(p)
+		if fi, err := os.Stat(clean); err == nil && !fi.IsDir() {
+			foundPath = clean
 			break
 		}
 	}
@@ -2349,7 +2397,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
-	host := r.Host
+	host := sanitizeHost(r.Host)
 	proto := "https"
 	if r.TLS == nil && !strings.Contains(host, "stiqrnotes.com") {
 		proto = "http"
@@ -2446,7 +2494,7 @@ exec "$TARGET_BIN" \
 }
 
 func (s *Server) handlePowerShellScript(w http.ResponseWriter, r *http.Request) {
-	host := r.Host
+	host := sanitizeHost(r.Host)
 	proto := "https"
 	if r.TLS == nil && !strings.Contains(host, "stiqrnotes.com") {
 		proto = "http"
