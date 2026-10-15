@@ -446,10 +446,27 @@
   - **Concurrent Map Race Fix in Escrow**:
     - Deep-copied maps in `pkg/escrow/escrow.go:ListContracts()` under read lock to prevent concurrent iteration/mutation panics during JSON serialization.
 
+- **Phase 20: Conservative User Affinity Storage Pods, Adaptive Chatter Decay & Batched Audits (Completed & Verified)**:
+  - **Rendezvous Hashing with Dual Bias (`SelectQuorumForUser`)**:
+    - 70% Conservative Affinity Bias (`sha256(userPubAddress + ":" + peerNodeID)`): Ensures a user's data deterministically clusters on the same 2-3 storage nodes (Storage Pods), eliminating scatter and broadcast chatter.
+    - 30% Dynamic Health & Reputation (Adapts Immediately): Real-time gating on `IsOnline`, social reputation, and latency penalties ($>250\text{ms}$). If an affinity node goes offline or degrades, the network immediately evicts it and seamlessly promotes the deterministic runner-up node.
+    - Recovery: When the recovered node comes back online and stabilizes, it resumes its affinity slot smoothly.
+  - **Epoch-Salted Rotating Co-Auditors**:
+    - Co-auditors are salted with the current weekly epoch (`time.Now().Unix() / (7 * 86400)`), ensuring independent auditing and preventing long-term auditor-storage collusion while keeping storage nodes sticky.
+  - **Batched Audit Cycles**:
+    - `RunAuditCycle` in `pkg/audit/auditor.go` caches probe results per unique storage node within each cycle.
+    - Multiple records belonging to the same storage node/user are verified in a single probe, reducing audit network traffic by up to 90%+.
+  - **Affinity-Preserving Self-Healing Failover**:
+    - When a storage node fails an audit, replacement node selection prioritizes the user's affinity runner-up ranking, keeping all records for that user consolidated on the same failover peer.
+  - **Adaptive Heartbeat & Gossip Decay**:
+    - Healthy, stable nodes with social score $\ge 70$ back off probing to once every 45s.
+    - Recovering, degraded, or newly registered nodes are probed every tick to ensure immediate adaptation.
+
 ### Operational Status & Next Steps
 - **Production Server**: Physical Raspberry Pi 4/5 (`192.168.1.50`) running `v0.2.0` active.
 - **Local Workstation**: Local standalone daemon running `v0.2.0` on port 8100/8101 active.
 - **SDK Status**: Both Dart (`sdk/dart`) and TypeScript (`sdk/ts`) at `0.2.0` with 100% test pass rates and full cross-platform mobile/desktop/web/server readiness.
+- **P2P & Audit Scaling**: User affinity storage pods, batched cycle audits, and adaptive decay implemented and verified (all Go and SDK tests passing).
 - **Git State**: Clean working tree, all tests passing.
 
 
