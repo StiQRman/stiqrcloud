@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/stiqrhub/testcloud/pkg/audit"
-	"github.com/stiqrhub/testcloud/pkg/escrow"
-	"github.com/stiqrhub/testcloud/pkg/p2p"
-	"github.com/stiqrhub/testcloud/pkg/reticulum"
-	"github.com/stiqrhub/testcloud/pkg/storage"
-	"github.com/stiqrhub/testcloud/pkg/version"
+	"github.com/stiqrhub/stiqrcloud/pkg/audit"
+	"github.com/stiqrhub/stiqrcloud/pkg/escrow"
+	"github.com/stiqrhub/stiqrcloud/pkg/p2p"
+	"github.com/stiqrhub/stiqrcloud/pkg/reticulum"
+	"github.com/stiqrhub/stiqrcloud/pkg/storage"
+	"github.com/stiqrhub/stiqrcloud/pkg/version"
 )
 
 //go:embed dashboard.html

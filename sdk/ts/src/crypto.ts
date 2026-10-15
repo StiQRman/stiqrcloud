@@ -1,4 +1,4 @@
-import { TestCloudCryptoError } from './errors.js';
+import { StiQRcloudCryptoError } from './errors.js';
 
 export interface EnvelopeJson {
   version: number;
@@ -53,15 +53,15 @@ export class EncryptedEnvelope {
 }
 
 /**
- * Client-side cryptographic suite for TestCloud
+ * Client-side cryptographic suite for StiQRcloud
  * Uses native Web Crypto API (SubtleCrypto) compatible with Node.js 18+ and modern browsers.
  */
-export class TestCloudCrypto {
+export class StiQRcloudCrypto {
   private static get subtle(): SubtleCrypto {
     if (typeof globalThis.crypto?.subtle !== 'undefined') {
       return globalThis.crypto.subtle;
     }
-    throw new TestCloudCryptoError('SubtleCrypto is not available in this runtime environment.');
+    throw new StiQRcloudCryptoError('SubtleCrypto is not available in this runtime environment.');
   }
 
   /**
@@ -77,7 +77,7 @@ export class TestCloudCrypto {
    * Computes SHA-256 hash of bytes as hex string
    */
   static async sha256Hex(data: Uint8Array): Promise<string> {
-    const digest = await TestCloudCrypto.subtle.digest('SHA-256', data as unknown as BufferSource);
+    const digest = await StiQRcloudCrypto.subtle.digest('SHA-256', data as unknown as BufferSource);
     return bytesToHex(new Uint8Array(digest));
   }
 
@@ -86,9 +86,9 @@ export class TestCloudCrypto {
    */
   private static async importAesKey(keyBytes: Uint8Array): Promise<CryptoKey> {
     if (keyBytes.length !== 32) {
-      throw new TestCloudCryptoError(`Invalid AES key length: expected 32 bytes, got ${keyBytes.length}`);
+      throw new StiQRcloudCryptoError(`Invalid AES key length: expected 32 bytes, got ${keyBytes.length}`);
     }
-    return await TestCloudCrypto.subtle.importKey(
+    return await StiQRcloudCrypto.subtle.importKey(
       'raw',
       keyBytes as unknown as BufferSource,
       { name: 'AES-GCM', length: 256 },
@@ -98,7 +98,7 @@ export class TestCloudCrypto {
   }
 
   /**
-   * Encrypts plaintext string using AES-256-GCM and returns standard TestCloud EncryptedEnvelope
+   * Encrypts plaintext string using AES-256-GCM and returns standard StiQRcloud EncryptedEnvelope
    */
   static async encryptText(plainText: string, keyBytes: Uint8Array): Promise<EncryptedEnvelope> {
     try {
@@ -124,12 +124,12 @@ export class TestCloudCrypto {
         toBase64(ciphertext)
       );
     } catch (e: any) {
-      throw new TestCloudCryptoError(`Failed to encrypt text payload: ${e.message}`);
+      throw new StiQRcloudCryptoError(`Failed to encrypt text payload: ${e.message}`);
     }
   }
 
   /**
-   * Decrypts TestCloud EncryptedEnvelope using AES-256-GCM and returns original plaintext string
+   * Decrypts StiQRcloud EncryptedEnvelope using AES-256-GCM and returns original plaintext string
    */
   static async decryptText(envelope: EncryptedEnvelope, keyBytes: Uint8Array): Promise<string> {
     try {
@@ -151,7 +151,7 @@ export class TestCloudCrypto {
 
       return new TextDecoder().decode(decryptedBuffer);
     } catch (e: any) {
-      throw new TestCloudCryptoError(`Failed to decrypt envelope (invalid key or MAC error): ${e.message}`);
+      throw new StiQRcloudCryptoError(`Failed to decrypt envelope (invalid key or MAC error): ${e.message}`);
     }
   }
 
@@ -182,7 +182,7 @@ export class TestCloudCrypto {
       out.set(ciphertext, 28);
       return out;
     } catch (e: any) {
-      throw new TestCloudCryptoError(`Failed to encrypt bytes: ${e.message}`);
+      throw new StiQRcloudCryptoError(`Failed to encrypt bytes: ${e.message}`);
     }
   }
 
@@ -191,7 +191,7 @@ export class TestCloudCrypto {
    */
   static async decryptBytes(encryptedData: Uint8Array, keyBytes: Uint8Array): Promise<Uint8Array> {
     if (encryptedData.length < 28) {
-      throw new TestCloudCryptoError('Encrypted payload too short (must be >= 28 bytes)');
+      throw new StiQRcloudCryptoError('Encrypted payload too short (must be >= 28 bytes)');
     }
     try {
       const key = await this.importAesKey(keyBytes);
@@ -211,7 +211,7 @@ export class TestCloudCrypto {
 
       return new Uint8Array(decrypted);
     } catch (e: any) {
-      throw new TestCloudCryptoError(`Failed to decrypt bytes: ${e.message}`);
+      throw new StiQRcloudCryptoError(`Failed to decrypt bytes: ${e.message}`);
     }
   }
 
@@ -233,7 +233,7 @@ export class TestCloudCrypto {
         privateKey: keyPair.privateKey,
       };
     } catch (e: any) {
-      throw new TestCloudCryptoError(`Ed25519 key generation not supported in this environment: ${e.message}`);
+      throw new StiQRcloudCryptoError(`Ed25519 key generation not supported in this environment: ${e.message}`);
     }
   }
 
@@ -249,7 +249,7 @@ export class TestCloudCrypto {
       );
       return bytesToHex(new Uint8Array(sigBuffer));
     } catch (e: any) {
-      throw new TestCloudCryptoError(`Failed to sign message: ${e.message}`);
+      throw new StiQRcloudCryptoError(`Failed to sign message: ${e.message}`);
     }
   }
 
@@ -324,7 +324,7 @@ export class TestCloudCrypto {
    * Alias for generateUuidV7()
    */
   static generateId(): string {
-    return TestCloudCrypto.generateUuidV7();
+    return StiQRcloudCrypto.generateUuidV7();
   }
 }
 
@@ -380,3 +380,7 @@ export function fromBase64Url(str: string): Uint8Array {
   }
   return fromBase64(b64);
 }
+
+// Backwards-compatible alias
+export const TestCloudCrypto = StiQRcloudCrypto;
+export type TestCloudCrypto = StiQRcloudCrypto;

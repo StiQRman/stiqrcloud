@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TestCloud Node Dashboard</title>
+  <title>StiQRcloud Node Dashboard</title>
   <style>
     :root {
       --bg-base: #0f172a;
@@ -470,7 +470,7 @@
     <div class="sidebar-header">
       <div class="brand-title">
         <span style="font-size:1.3rem;">⚡</span>
-        <span>TestCloud DB</span>
+        <span>StiQRcloud DB</span>
       </div>
       <span class="badge badge-primary" id="version-tag">v0.1.0</span>
     </div>
@@ -815,7 +815,7 @@
         <div class="form-group" id="group-custom-nodes">
           <label>Storage Node Addresses (RNode Destination Hashes / Peer IDs)</label>
           <input type="text" id="new-record-nodes" class="mono" placeholder="Comma-separated RNode addresses (e.g. 7c9a4b...), or leave blank for random auto-quorum">
-          <span style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:4px;">Enter specific storage node RNode addresses or leave blank to let TestCloud randomly pick quorum peers.</span>
+          <span style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:4px;">Enter specific storage node RNode addresses or leave blank to let StiQRcloud randomly pick quorum peers.</span>
         </div>
       </div>
       <div class="modal-footer">
@@ -1955,7 +1955,7 @@
     }
 
     function renderQRCodeSVG(text, pixelSize = 220) {
-      if (!text) text = 'testcloud-node';
+      if (!text) text = 'stiqrcloud-node';
       const { size, matrix } = createQRCode(text);
       const scale = pixelSize / (size + 8);
       let paths = [];
@@ -1975,8 +1975,8 @@
     }
 
     function openNodeQRModal() {
-      const dest = currentRnsDest || document.getElementById('rns-dest').textContent || 'testcloud-node';
-      const cleanDest = (dest === '-' || !dest) ? 'testcloud-node' : dest;
+      const dest = currentRnsDest || document.getElementById('rns-dest').textContent || 'stiqrcloud-node';
+      const cleanDest = (dest === '-' || !dest) ? 'stiqrcloud-node' : dest;
       document.getElementById('qr-modal-rnode-input').value = cleanDest;
       const container = document.getElementById('rnode-qr-container');
       try {

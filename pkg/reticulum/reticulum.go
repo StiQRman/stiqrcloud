@@ -19,7 +19,7 @@ const (
 	DestinationLength = 16  // 16 bytes (128 bits)
 	HeaderMinLength   = 19  // Flags (1) + Hops (1) + Destination (16) + Context (1)
 	MaxMTU            = 500 // Reticulum Maximum Transmission Unit
-	DefaultRNSAspect  = "testcloud.node"
+	DefaultRNSAspect  = "stiqrcloud.node"
 	DefaultRNSPort    = 4242 // Default Reticulum TCP/UDP port
 )
 
@@ -358,7 +358,7 @@ func (im *InterfaceManager) acceptTCP(l net.Listener) {
 
 		// Send initial Announce frame over TCP to newly connected peer (e.g. Columba)
 		if im.identity != nil {
-			annPacket := im.identity.BuildAnnouncePacket([]byte("testcloud.node"))
+			annPacket := im.identity.BuildAnnouncePacket([]byte(DefaultRNSAspect))
 			frame := FrameHDLC(EncodePacket(annPacket))
 			_, _ = conn.Write(frame)
 		}
@@ -423,7 +423,7 @@ func (im *InterfaceManager) ConnectTCP(targetAddr string) error {
 
 	// Send initial Announce frame over TCP to newly connected gateway
 	if im.identity != nil {
-		annPacket := im.identity.BuildAnnouncePacket([]byte("testcloud.node"))
+		annPacket := im.identity.BuildAnnouncePacket([]byte(DefaultRNSAspect))
 		frame := FrameHDLC(EncodePacket(annPacket))
 		_, _ = conn.Write(frame)
 	}
@@ -530,7 +530,7 @@ func (im *InterfaceManager) ConnectTCPWithFailover(gateways []string) {
 
 			// Periodic announce to keep destination active on gateway
 			if connected {
-				_ = im.Announce([]byte("testcloud.node"))
+				_ = im.Announce([]byte(DefaultRNSAspect))
 			}
 
 			select {

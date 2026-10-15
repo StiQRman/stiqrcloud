@@ -1,21 +1,21 @@
-/// TestCloud SDK Exceptions
-class TestCloudException implements Exception {
+/// StiQRcloud SDK Exceptions
+class StiQRcloudException implements Exception {
   final String message;
   final dynamic cause;
 
-  TestCloudException(this.message, [this.cause]);
+  StiQRcloudException(this.message, [this.cause]);
 
   @override
   String toString() => cause != null
-      ? 'TestCloudException: $message (Cause: $cause)'
-      : 'TestCloudException: $message';
+      ? 'StiQRcloudException: $message (Cause: $cause)'
+      : 'StiQRcloudException: $message';
 }
 
-class TestCloudApiException extends TestCloudException {
+class StiQRcloudApiException extends StiQRcloudException {
   final int statusCode;
   final String responseBody;
 
-  TestCloudApiException(
+  StiQRcloudApiException(
     this.statusCode,
     String message, [
     this.responseBody = '',
@@ -23,16 +23,22 @@ class TestCloudApiException extends TestCloudException {
 
   @override
   String toString() =>
-      'TestCloudApiException [$statusCode]: $message\nResponse: $responseBody';
+      'StiQRcloudApiException [$statusCode]: $message\nResponse: $responseBody';
 }
 
-class TestCloudNotFoundException extends TestCloudApiException {
+class StiQRcloudNotFoundException extends StiQRcloudApiException {
   final String dataId;
 
-  TestCloudNotFoundException(this.dataId, [String responseBody = ''])
+  StiQRcloudNotFoundException(this.dataId, [String responseBody = ''])
       : super(404, 'Record with DataID "$dataId" not found', responseBody);
 }
 
-class TestCloudCryptoException extends TestCloudException {
-  TestCloudCryptoException(super.message, [super.cause]);
+class StiQRcloudCryptoException extends StiQRcloudException {
+  StiQRcloudCryptoException(super.message, [super.cause]);
 }
+
+// Backwards-compatible aliases
+typedef TestCloudException = StiQRcloudException;
+typedef TestCloudApiException = StiQRcloudApiException;
+typedef TestCloudNotFoundException = StiQRcloudNotFoundException;
+typedef TestCloudCryptoException = StiQRcloudCryptoException;

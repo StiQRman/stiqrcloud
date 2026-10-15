@@ -1,8 +1,8 @@
 {
-  "name": "@stiqrhub/testcloud",
+  "name": "@stiqrhub/stiqrcloud",
   "version": "0.2.0",
   "type": "module",
-  "description": "Official TypeScript & JavaScript SDK for TestCloud decentralized storage mesh",
+  "description": "Official TypeScript & JavaScript SDK for StiQRcloud decentralized storage mesh",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -19,6 +19,7 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
+    "stiqrcloud",
     "testcloud",
     "decentralized",
     "storage",

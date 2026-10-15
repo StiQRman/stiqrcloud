@@ -1,15 +1,6 @@
-/// Official Dart & Flutter SDK for TestCloud.
-///
-/// A decentralized, local-first database engine with end-to-end encryption,
-/// invariant data IDs, and Reticulum mesh network support.
+/// Legacy backward-compatibility entry point for StiQRcloud.
+/// Prefer importing `package:stiqrcloud/stiqrcloud.dart`.
+@deprecated
 library testcloud;
 
-export 'package:cryptography/cryptography.dart'
-    show SimpleKeyPair, SecretKey, SimplePublicKey, Signature;
-
-export 'src/client.dart';
-export 'src/crypto.dart';
-export 'src/exceptions.dart';
-export 'src/models.dart';
-export 'src/node_manager.dart';
-export 'src/record_service.dart';
+export 'stiqrcloud.dart';

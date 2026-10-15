@@ -1,4 +1,4 @@
-# TestCloud
+# StiQRcloud
 
 [![Version: v0.2.0](https://img.shields.io/badge/Version-v0.2.0-blue.svg)](releases/version.json)
 [![Go: 1.23+](https://img.shields.io/badge/Go-1.23+-00ADD8.svg?style=flat&logo=go)](https://golang.org)
@@ -52,12 +52,12 @@
 
 ### Running Locally (Standalone Mode)
 ```bash
-./testcloud -standalone -port 8101 -data-dir ./data
+./stiqrcloud -standalone -port 8101 -data-dir ./data
 ```
 
 ### Running in P2P Mesh Mode with Reticulum
 ```bash
-./testcloud -port 8101 -rns-port 4242 -data-dir ./data
+./stiqrcloud -port 8101 -rns-port 4242 -data-dir ./data
 ```
 
 Access the local dashboard at:

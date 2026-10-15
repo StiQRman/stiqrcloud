@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stiqrhub/testcloud/pkg/storage"
+	"github.com/stiqrhub/stiqrcloud/pkg/storage"
 )
 
 // Peer represents a database node on the mesh.

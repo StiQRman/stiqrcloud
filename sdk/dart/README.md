@@ -1,6 +1,6 @@
-# TestCloud Client SDK for Dart & Flutter
+# StiQRcloud Client SDK for Dart & Flutter
 
-Official Dart and Flutter client SDK for **TestCloud** — a decentralized, local-first database engine with client-side end-to-end encryption, invariant data routing, and Reticulum mesh network integration.
+Official Dart and Flutter client SDK for **StiQRcloud** — a decentralized, local-first database engine with client-side end-to-end encryption, invariant data routing, and Reticulum mesh network integration.
 
 ---
 
@@ -18,19 +18,19 @@ Official Dart and Flutter client SDK for **TestCloud** — a decentralized, loca
 
 ## Installation
 
-Add `testcloud` to your `pubspec.yaml`:
+Add `stiqrcloud` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  testcloud:
-    path: /path/to/testcloud/sdk/dart
+  stiqrcloud:
+    path: /path/to/stiqrcloud/sdk/dart
 ```
 
 Or when published:
 
 ```yaml
 dependencies:
-  testcloud: ^0.1.0
+  stiqrcloud: ^0.1.0
 ```
 
 ---
@@ -40,16 +40,16 @@ dependencies:
 ### 1. Initialize Client & Keypair
 
 ```dart
-import 'package:testcloud/testcloud.dart';
+import 'package:stiqrcloud/stiqrcloud.dart';
 
 void main() async {
   // Generate client Ed25519 keypair for cryptographic identity and signing
-  final keyPair = await TestCloudCrypto.generateKeyPair();
-  final pubAddress = await TestCloudCrypto.getPublicAddress(keyPair);
+  final keyPair = await StiQRcloudCrypto.generateKeyPair();
+  final pubAddress = await StiQRcloudCrypto.getPublicAddress(keyPair);
   print('Owner Address: $pubAddress');
 
   // Initialize client pointing to local node or gateway
-  final client = TestCloudClient(
+  final client = StiQRcloudClient(
     baseUrl: 'http://localhost:8101',
     keyPair: keyPair,
   );
@@ -62,7 +62,7 @@ void main() async {
 
 ```dart
 // 1. Generate a random 256-bit Data Encryption Key (DEK)
-final dek = TestCloudCrypto.generateDek();
+final dek = StiQRcloudCrypto.generateDek();
 
 // 2. Store encrypted record in cluster
 final response = await client.createRecord(
@@ -123,15 +123,15 @@ final downloadedBytes = await client.downloadFile(
 
 ### 5. Universal Invariant Routing Across Subnets
 
-Because TestCloud guarantees Data ID invariance, any node in the cluster will resolve a record:
+Because StiQRcloud guarantees Data ID invariance, any node in the cluster will resolve a record:
 
 ```dart
 // Created on Node 1 (127.10.1.1)
-final client1 = TestCloudClient(baseUrl: 'http://127.10.1.1:8101');
+final client1 = StiQRcloudClient(baseUrl: 'http://127.10.1.1:8101');
 final created = await client1.createRecord(collection: 'feed', text: 'Universal Data');
 
 // Queried directly from Node 5 (127.10.5.1 on a completely different subnet)
-final client5 = TestCloudClient(baseUrl: 'http://127.10.5.1:8101');
+final client5 = StiQRcloudClient(baseUrl: 'http://127.10.5.1:8101');
 final resolved = await client5.getRecord(created.dataId);
 print(resolved.text); // 'Universal Data'
 ```

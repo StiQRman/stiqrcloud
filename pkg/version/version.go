@@ -10,8 +10,8 @@ import (
 // Current semantic version of the database node.
 const (
 	CurrentVersion = "v0.2.0"
-	AppName        = "testcloud"
-	UpdateFeedURL  = "https://raw.githubusercontent.com/stiqrhub/testcloud/main/releases/version.json"
+	AppName        = "stiqrcloud"
+	UpdateFeedURL  = "https://raw.githubusercontent.com/stiqrhub/stiqrcloud/main/releases/version.json"
 )
 
 // Release describes a published release version.
@@ -49,7 +49,7 @@ var DefaultHistory = []Release{
 			"Strict node-level write authorization verifying owner & authorized editor ACL signatures",
 			"PocketBase-style dashboard UI with Collections sidebar, dynamic schema fields, and lockbox visualizer",
 		},
-		DownloadURL: "https://github.com/stiqrhub/testcloud/releases/tag/v0.2.0",
+		DownloadURL: "https://github.com/stiqrhub/stiqrcloud/releases/tag/v0.2.0",
 		ChecksumSHA: "297dce0408faa819ceac7c9e4e707aa911e1930c8c2173c4503858dc883673cd",
 		IsMandatory: false,
 	},
@@ -65,7 +65,7 @@ var DefaultHistory = []Release{
 			"Pluggable Bitcoin Lightning Network micropayments & Mock LN Sandbox",
 			"Local dark-mode dashboard with live telemetry and Settings Update Card",
 		},
-		DownloadURL: "https://github.com/stiqrhub/testcloud/releases/tag/v0.1.0",
+		DownloadURL: "https://github.com/stiqrhub/stiqrcloud/releases/tag/v0.1.0",
 		ChecksumSHA: "99c9f52458448593b5efde40a7a7c3e7d81d4980890104f5f9362ff397a9a7f6",
 		IsMandatory: false,
 	},

@@ -17,12 +17,12 @@ case "$1" in
     exec "$CONSOLE_PY" --no-curses
     ;;
   "stop"|"down")
-    echo "Stopping any running testcloud cluster nodes..."
-    pkill -x "testcloud" 2>/dev/null || true
+    echo "Stopping any running stiqrcloud cluster nodes..."
+    pkill -x "stiqrcloud" 2>/dev/null || true
     echo "All nodes stopped."
     ;;
   "status")
-    echo "=== TestCloud 6-Node Multi-Region Status ==="
+    echo "=== StiQRcloud 6-Node Multi-Region Status ==="
     printf "%-8s %-18s %-16s %-16s %-16s %-10s\n" "NODE" "ROLE" "LOCATION" "SIMULATED WAN IP" "ENDPOINT" "STATUS"
     printf -- "--------------------------------------------------------------------------------------------------\n"
     for item in \
@@ -34,7 +34,7 @@ case "$1" in
       "Finn:Storage Node 3:Sydney, AU:13.70.151.12:http://127.10.6.1:8101"
     do
       IFS=":" read -r name role loc ip url <<< "$item"
-      status=$(curl -s --connect-timeout 0.4 "$url/api/health" | grep -q "testcloud" && echo -e "\033[92mONLINE\033[0m" || echo -e "\033[91mOFFLINE\033[0m")
+      status=$(curl -s --connect-timeout 0.4 "$url/api/health" | grep -q "stiqrcloud" && echo -e "\033[92mONLINE\033[0m" || echo -e "\033[91mOFFLINE\033[0m")
       printf "%-8s %-18s %-16s %-16s %-16s %-10b\n" "$name" "$role" "$loc" "$ip" "$url" "$status"
     done
     printf -- "--------------------------------------------------------------------------------------------------\n"

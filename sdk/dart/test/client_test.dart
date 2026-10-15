@@ -1,19 +1,19 @@
 import 'dart:convert';
 import 'package:test/test.dart';
-import 'package:testcloud/testcloud.dart';
+import 'package:stiqrcloud/stiqrcloud.dart';
 
 void main() {
   const node1Url = 'http://127.10.1.1:8101';
   const node4Url = 'http://127.10.4.1:8101'; // Storage node on Subnet 4
-  const localhostUrl = 'http://localhost:8101';
+  const localhostUrl = 'http://127.0.0.1:8101';
 
-  group('TestCloudClient Live Cluster Integration', () {
-    late TestCloudClient client;
+  group('StiQRcloudClient Live Cluster Integration', () {
+    late StiQRcloudClient client;
     late SimpleKeyPair keyPair;
 
     setUpAll(() async {
-      keyPair = await TestCloudCrypto.generateKeyPair();
-      client = TestCloudClient(baseUrl: localhostUrl, keyPair: keyPair);
+      keyPair = await StiQRcloudCrypto.generateKeyPair();
+      client = StiQRcloudClient(baseUrl: localhostUrl, keyPair: keyPair);
     });
 
     tearDownAll(() {
@@ -23,7 +23,7 @@ void main() {
     test('getHealth returns node metadata and Reticulum address', () async {
       final health = await client.getHealth();
       expect(health.status, equals('ok'));
-      expect(health.appName, equals('testcloud'));
+      expect(health.appName, equals('stiqrcloud'));
       expect(health.version, startsWith('v0.'));
       expect(health.nodeId, isNotEmpty);
       expect(health.rnsDest, isNotNull);
@@ -54,7 +54,7 @@ void main() {
     });
 
     test('createRecord and getRecord with Client-Side AES-256-GCM Encryption', () async {
-      final dek = TestCloudCrypto.generateDek();
+      final dek = StiQRcloudCrypto.generateDek();
       const secretMessage = 'Top secret financial records encrypted with AES-256-GCM.';
 
       final res = await client.createRecord(
@@ -89,7 +89,7 @@ void main() {
       );
 
       // Create client pointing directly to Node 4 (Storage node on separate subnet 127.10.4.0/24)
-      final clientNode4 = TestCloudClient(baseUrl: node4Url);
+      final clientNode4 = StiQRcloudClient(baseUrl: node4Url);
       try {
         final resolved = await clientNode4.getRecord(res.dataId);
         expect(resolved.dataId, equals(res.dataId));

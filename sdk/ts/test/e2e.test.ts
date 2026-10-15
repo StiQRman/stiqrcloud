@@ -15,9 +15,11 @@ describe('TypeScript SDK Live End-to-End Integration', () => {
 
   before(async () => {
     testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc_ts_e2e_'));
-    const binPath = fs.existsSync(path.resolve(process.cwd(), '../../testcloud'))
-      ? path.resolve(process.cwd(), '../../testcloud')
-      : path.resolve(process.cwd(), '../../releases/v0.2.0/testcloud-linux-amd64');
+    const binPath = fs.existsSync(path.resolve(process.cwd(), '../../stiqrcloud'))
+      ? path.resolve(process.cwd(), '../../stiqrcloud')
+      : fs.existsSync(path.resolve(process.cwd(), '../../releases/v0.2.0/stiqrcloud-linux-amd64'))
+      ? path.resolve(process.cwd(), '../../releases/v0.2.0/stiqrcloud-linux-amd64')
+      : path.resolve(process.cwd(), '../../testcloud');
 
     // Spawn real TestCloud backend daemon
     nodeProcess = spawn(binPath, [

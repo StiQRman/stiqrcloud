@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stiqrhub/testcloud/pkg/crypto"
-	"github.com/stiqrhub/testcloud/pkg/escrow"
-	"github.com/stiqrhub/testcloud/pkg/p2p"
-	"github.com/stiqrhub/testcloud/pkg/storage"
+	"github.com/stiqrhub/stiqrcloud/pkg/crypto"
+	"github.com/stiqrhub/stiqrcloud/pkg/escrow"
+	"github.com/stiqrhub/stiqrcloud/pkg/p2p"
+	"github.com/stiqrhub/stiqrcloud/pkg/storage"
 )
 
 // Challenge represents an unpredictable cryptographic audit challenge.

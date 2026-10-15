@@ -19,7 +19,7 @@ var gearTable [256]uint64
 
 func init() {
 	// Generate deterministic 64-bit random values using SHA-256 seed
-	seed := []byte("TestCloud-FastCDC-Gear-Table-v1")
+	seed := []byte("StiQRcloud-FastCDC-Gear-Table-v1")
 	var buf [32]byte
 	h := sha256.Sum256(seed)
 	copy(buf[:], h[:])

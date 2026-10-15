@@ -1,5 +1,5 @@
 /**
- * TestCloud TypeScript & JavaScript Client SDK
+ * StiQRcloud TypeScript & JavaScript Client SDK
  * Decentralized Storage Mesh & Reticulum Backbone Client
  */
 
@@ -10,5 +10,5 @@ export * from './node-manager.js';
 export * from './client.js';
 
 // Default export
-import { TestCloudClient } from './client.js';
-export default TestCloudClient;
+import { StiQRcloudClient } from './client.js';
+export default StiQRcloudClient;

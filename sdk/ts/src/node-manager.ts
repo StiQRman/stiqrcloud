@@ -1,5 +1,5 @@
 import { NodeConfig, NodeHealth } from './models.js';
-import { TestCloudNodeOfflineError } from './errors.js';
+import { StiQRcloudNodeOfflineError } from './errors.js';
 
 export interface NodeManagerOptions {
   /** Primary node URL (e.g. user's own local node 'http://localhost:8100') */
@@ -183,7 +183,7 @@ export class NodeManager {
       if (config) {
         config.isOnline = false;
       }
-      throw new TestCloudNodeOfflineError(target, err);
+      throw new StiQRcloudNodeOfflineError(target, err);
     }
   }
 

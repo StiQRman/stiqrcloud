@@ -98,7 +98,7 @@ class NodeManager {
     try {
       final resp = await _client.get(uri).timeout(const Duration(seconds: 4));
       if (resp.statusCode != 200) {
-        throw TestCloudException('Node health check returned ${resp.statusCode}: ${resp.body}');
+        throw StiQRcloudException('Node health check returned ${resp.statusCode}: ${resp.body}');
       }
       final map = jsonDecode(resp.body) as Map<String, dynamic>;
       final health = NodeHealth.fromJson(map);
@@ -118,7 +118,7 @@ class NodeManager {
         isHealthy: false,
         lastChecked: DateTime.now().toUtc(),
       );
-      throw TestCloudException('Failed to reach node at $norm: $e');
+      throw StiQRcloudException('Failed to reach node at $norm: $e');
     }
   }
 

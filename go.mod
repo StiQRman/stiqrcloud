@@ -1,4 +1,4 @@
-module github.com/stiqrhub/testcloud
+module github.com/stiqrhub/stiqrcloud
 
 go 1.25.0
 

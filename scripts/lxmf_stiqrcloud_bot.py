@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-TestCloud LXMF Bluetooth / Reticulum Gateway Bot
+StiQRcloud LXMF Bluetooth / Reticulum Gateway Bot
 ================================================
 Listens for incoming LXMF messages from Columba (or any LXMF client) over Bluetooth LE / Reticulum,
-stores incoming messages as decentralized records into the TestCloud cluster, and sends an
+stores incoming messages as decentralized records into the StiQRcloud cluster, and sends an
 automated acknowledgment message back to the sender over Reticulum.
 """
 
@@ -21,13 +21,13 @@ import RNS
 import LXMF
 
 # Paths & Settings
-APP_DIR = "./testcloud"
+APP_DIR = "./stiqrcloud"
 DATA_DIR = os.path.join(APP_DIR, "data")
 STORAGE_PATH = os.path.join(DATA_DIR, "lxmf_storage")
 IDENTITY_PATH = os.path.join(DATA_DIR, "lxmf_identity")
 LOG_PATH = os.path.join(DATA_DIR, "logs", "lxmf_bot.log")
 TESTCLOUD_API_URL = "http://127.10.1.1:8101/api/records"
-DISPLAY_NAME = "TestCloud Gateway"
+DISPLAY_NAME = "StiQRcloud Gateway"
 ANNOUNCE_INTERVAL = 20  # Seconds between mesh announces
 
 os.makedirs(STORAGE_PATH, exist_ok=True)
@@ -53,8 +53,8 @@ def handle_sigterm(signum, frame):
 signal.signal(signal.SIGINT, handle_sigterm)
 signal.signal(signal.SIGTERM, handle_sigterm)
 
-def ingest_to_testcloud(sender_hash, title, content):
-    """Stores the received message into the local TestCloud cluster via REST API."""
+def ingest_to_stiqrcloud(sender_hash, title, content):
+    """Stores the received message into the local StiQRcloud cluster via REST API."""
     full_text = f"[{title}] {content}" if title else content
     payload = {
         "collection": "columba_messages",
@@ -74,21 +74,21 @@ def ingest_to_testcloud(sender_hash, title, content):
                 data_id = res_body.get("data_id", "rec_stored")
                 auditors = res_body.get("auditor_peers", [])
                 storage_nodes = res_body.get("storage_peers", [])
-                log(f"Stored in TestCloud! DataID: {data_id} | Auditors: {len(auditors)} | Storage Peers: {len(storage_nodes)}")
+                log(f"Stored in StiQRcloud! DataID: {data_id} | Auditors: {len(auditors)} | Storage Peers: {len(storage_nodes)}")
                 return data_id, True
             else:
-                log(f"TestCloud API error: status {response.status}")
+                log(f"StiQRcloud API error: status {response.status}")
                 return "api_error", False
     except urllib.error.URLError as e:
-        log(f"Failed to connect to TestCloud API: {e}")
+        log(f"Failed to connect to StiQRcloud API: {e}")
         return "cluster_offline", False
     except Exception as e:
-        log(f"Unexpected error storing to TestCloud: {e}")
+        log(f"Unexpected error storing to StiQRcloud: {e}")
         return "error", False
 
 def main():
     global running
-    log("Starting TestCloud LXMF Gateway Bot...")
+    log("Starting StiQRcloud LXMF Gateway Bot...")
 
     # Connect to Reticulum shared instance
     rns = RNS.Reticulum()
@@ -125,14 +125,14 @@ def main():
             log(f"Title  : {title if title else '(no title)'}")
             log(f"Content: {content}")
 
-            # Ingest into TestCloud
-            data_id, success = ingest_to_testcloud(sender_hash, title, content)
+            # Ingest into StiQRcloud
+            data_id, success = ingest_to_stiqrcloud(sender_hash, title, content)
 
             # Build ACK reply
             if success:
                 reply_text = (
-                    f"☁️ TestCloud Cluster ACK\n\n"
-                    f"✅ Message saved to TestCloud!\n"
+                    f"☁️ StiQRcloud Cluster ACK\n\n"
+                    f"✅ Message saved to StiQRcloud!\n"
                     f"📁 Record ID: {data_id}\n"
                     f"🌐 Gateway: Node 1 (127.10.1.1)\n"
                     f"🔗 Replicated across 6 cluster nodes.\n"
@@ -140,7 +140,7 @@ def main():
                 )
             else:
                 reply_text = (
-                    f"☁️ TestCloud Cluster ACK\n\n"
+                    f"☁️ StiQRcloud Cluster ACK\n\n"
                     f"⚠️ Message received over BLE, but cluster API returned: {data_id}\n"
                     f"⏱ Received: {datetime.now().strftime('%H:%M:%S')}"
                 )
@@ -157,7 +157,7 @@ def main():
                     destination=reply_dest,
                     source=delivery_dest,
                     content=reply_text,
-                    title="TestCloud ACK"
+                    title="StiQRcloud ACK"
                 )
                 router.handle_outbound(reply_msg)
                 log(f"Sent LXMF reply to {sender_formatted}")
@@ -187,7 +187,7 @@ def main():
             router.announce(delivery_dest.hash)
             last_announce = now
 
-    log("TestCloud LXMF Gateway Bot stopped.")
+    log("StiQRcloud LXMF Gateway Bot stopped.")
 
 if __name__ == "__main__":
     main()

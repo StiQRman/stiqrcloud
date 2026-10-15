@@ -1,16 +1,16 @@
-# TestCloud P2P Mesh & Rendezvous System Record
+# StiQRcloud P2P Mesh & Rendezvous System Record
 
 **Date**: October 3, 2026  
 **Status**: Production Ready & Fully Verified  
 **Public Gateway & Discovery Rendezvous**: `https://stiqrcloud.stiqrnotes.com`  
 **Pi Server LAN Address**: `http://192.168.1.50:8100`  
-**Repository**: `./testcloud`
+**Repository**: `./stiqrcloud`
 
 ---
 
 ## 1. Executive Summary & Architecture
 
-TestCloud is a database-first, decentralized P2P storage mesh with Reticulum Network Stack (RNS) compatibility and Lightning escrow settlement. 
+StiQRcloud is a database-first, decentralized P2P storage mesh with Reticulum Network Stack (RNS) compatibility and Lightning escrow settlement. 
 
 ```mermaid
 graph TD
@@ -48,7 +48,7 @@ iwr -useb https://stiqrcloud.stiqrnotes.com/install.ps1 | iex
 
 ### Standalone Binary Execution
 ```bash
-curl -sSL https://stiqrcloud.stiqrnotes.com/download/testcloud -o testcloud && chmod +x testcloud && ./testcloud -discovery-url "https://stiqrcloud.stiqrnotes.com" -name "FriendsNode"
+curl -sSL https://stiqrcloud.stiqrnotes.com/download/stiqrcloud -o stiqrcloud && chmod +x stiqrcloud && ./stiqrcloud -discovery-url "https://stiqrcloud.stiqrnotes.com" -name "FriendsNode"
 ```
 
 ---
@@ -120,10 +120,10 @@ Simulates a 6-node geographically dispersed quorum across 6 continents:
 ### Cluster Operations
 ```bash
 # Start 6-node cluster
-./testcloud/scripts/start_cluster.sh
+./stiqrcloud/scripts/start_cluster.sh
 
 # Stop all local nodes
-pkill -9 testcloud
+pkill -9 stiqrcloud
 ```
 
 ---
@@ -133,7 +133,7 @@ pkill -9 testcloud
 ### 1. Peer Status Flapping & Loopback Collision
 - **Cause**: Nodes running on default settings advertised `http://0.0.0.0:8100`. The Pi probed this address, hitting its own local listener, detecting a NodeID mismatch, and marking the peer offline. Passive gossip and periodic announcements then flipped it back online, creating continuous flapping.
 - **Fix**:
-  - `cmd/testcloud/main.go`: Default `listenAddr` is empty (`""`) when binding `0.0.0.0` without an explicit `-public-addr` or `-gateway-url`.
+  - `cmd/stiqrcloud/main.go`: Default `listenAddr` is empty (`""`) when binding `0.0.0.0` without an explicit `-public-addr` or `-gateway-url`.
   - `pkg/gateway/server.go` & `pkg/p2p/swarm.go`: Loopback/zero addresses (`0.0.0.0`, `127.0.0.1`, `localhost`) are automatically stripped.
   - `ProbePeers()`: If a probe detects a NodeID mismatch (self-loopback or port collision), it immediately clears `p.PublicAddr = ""` and marks the peer offline.
 
@@ -180,13 +180,13 @@ pkill -9 testcloud
     - **`full-mesh` / `distributed`**: Standard 3-node storage quorum.
   - Integration verified via `TestStoragePoliciesAndUserControl` in [`pkg/gateway/server_test.go`](pkg/gateway/server_test.go).
 
-### 8. Official TypeScript & JavaScript Client SDK (`@stiqrhub/testcloud`)
+### 8. Official TypeScript & JavaScript Client SDK (`@stiqrhub/stiqrcloud`)
 - **Location**: [`sdk/ts/`](sdk/ts)
 - **Runtime Support**: Works in Node.js 18+, modern web browsers, React, Vue, Svelte, and React Native with zero external runtime dependencies.
 - **Core Modules**:
   - **`NodeManager`** ([`sdk/ts/src/node-manager.ts`](sdk/ts/src/node-manager.ts)): Multi-node management allowing app users to connect their own local node (`http://localhost:8100`), add custom self-hosted nodes (Raspberry Pi, VPS, friend's node), switch primary nodes dynamically, and probe health/latency.
-  - **`TestCloudClient`** ([`sdk/ts/src/client.ts`](sdk/ts/src/client.ts)): Complete client supporting `storagePolicy` (`local-only`, `replicated-2`, `custom`), attachments, and PocketBase-compatible collection API.
-  - **`TestCloudCrypto`** ([`sdk/ts/src/crypto.ts`](sdk/ts/src/crypto.ts)): Client-side AES-256-GCM zero-knowledge encryption using Web Crypto API (`crypto.subtle`) and Ed25519 signing.
+  - **`StiQRcloudClient`** ([`sdk/ts/src/client.ts`](sdk/ts/src/client.ts)): Complete client supporting `storagePolicy` (`local-only`, `replicated-2`, `custom`), attachments, and PocketBase-compatible collection API.
+  - **`StiQRcloudCrypto`** ([`sdk/ts/src/crypto.ts`](sdk/ts/src/crypto.ts)): Client-side AES-256-GCM zero-knowledge encryption using Web Crypto API (`crypto.subtle`) and Ed25519 signing.
   - **Test Suite**: 22 unit and live backend integration tests in [`sdk/ts/test/`](sdk/ts/test).
 
 ### 9. Post-Quantum 2-of-3 Threshold & PocketBase Collections UI (`v0.2.0`)

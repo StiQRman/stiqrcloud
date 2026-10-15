@@ -8,14 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stiqrhub/testcloud/pkg/audit"
-	"github.com/stiqrhub/testcloud/pkg/escrow"
-	"github.com/stiqrhub/testcloud/pkg/p2p"
-	"github.com/stiqrhub/testcloud/pkg/storage"
+	"github.com/stiqrhub/stiqrcloud/pkg/audit"
+	"github.com/stiqrhub/stiqrcloud/pkg/escrow"
+	"github.com/stiqrhub/stiqrcloud/pkg/p2p"
+	"github.com/stiqrhub/stiqrcloud/pkg/storage"
 )
 
 func TestPocketBaseStyleDashboardEndpoints(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "testcloud_dash_test_*")
+	tempDir, err := os.MkdirTemp("", "stiqrcloud_dash_test_*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
 	}

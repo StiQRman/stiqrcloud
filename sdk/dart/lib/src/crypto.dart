@@ -56,8 +56,8 @@ class EncryptedEnvelope {
   }
 }
 
-/// Client-side cryptographic suite for TestCloud
-class TestCloudCrypto {
+/// Client-side cryptographic suite for StiQRcloud
+class StiQRcloudCrypto {
   static final _aesGcm = AesGcm.with256bits();
   static final _ed25519 = Ed25519();
   static final _random = Random.secure();
@@ -128,7 +128,7 @@ class TestCloudCrypto {
         ciphertext: base64.encode(box.cipherText),
       );
     } catch (e, st) {
-      throw TestCloudCryptoException('Failed to encrypt text payload', e);
+      throw StiQRcloudCryptoException('Failed to encrypt text payload', e);
     }
   }
 
@@ -147,7 +147,7 @@ class TestCloudCrypto {
       final decryptedBytes = await _aesGcm.decrypt(box, secretKey: secretKey);
       return utf8.decode(decryptedBytes);
     } catch (e, st) {
-      throw TestCloudCryptoException('Failed to decrypt envelope (invalid key or MAC error)', e);
+      throw StiQRcloudCryptoException('Failed to decrypt envelope (invalid key or MAC error)', e);
     }
   }
 
@@ -166,7 +166,7 @@ class TestCloudCrypto {
       out.setAll(box.nonce.length + box.mac.bytes.length, box.cipherText);
       return out;
     } catch (e) {
-      throw TestCloudCryptoException('Failed to encrypt byte payload', e);
+      throw StiQRcloudCryptoException('Failed to encrypt byte payload', e);
     }
   }
 
@@ -176,7 +176,7 @@ class TestCloudCrypto {
     List<int> keyBytes,
   ) async {
     if (encryptedData.length < 28) {
-      throw TestCloudCryptoException('Invalid encrypted payload length');
+      throw StiQRcloudCryptoException('Invalid encrypted payload length');
     }
     try {
       final nonce = encryptedData.sublist(0, 12);
@@ -186,7 +186,7 @@ class TestCloudCrypto {
       final box = SecretBox(cipherText, nonce: nonce, mac: mac);
       return await _aesGcm.decrypt(box, secretKey: secretKey);
     } catch (e) {
-      throw TestCloudCryptoException('Failed to decrypt byte payload', e);
+      throw StiQRcloudCryptoException('Failed to decrypt byte payload', e);
     }
   }
 
@@ -246,3 +246,6 @@ class TestCloudCrypto {
     return result;
   }
 }
+
+// Backwards-compatible alias
+typedef TestCloudCrypto = StiQRcloudCrypto;

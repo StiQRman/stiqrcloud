@@ -1,32 +1,32 @@
 import 'dart:convert';
 import 'package:test/test.dart';
-import 'package:testcloud/testcloud.dart';
+import 'package:stiqrcloud/stiqrcloud.dart';
 
 void main() {
-  group('TestCloudCrypto', () {
+  group('StiQRcloudCrypto', () {
     test('generateDek generates 32 secure bytes', () {
-      final dek1 = TestCloudCrypto.generateDek();
-      final dek2 = TestCloudCrypto.generateDek();
+      final dek1 = StiQRcloudCrypto.generateDek();
+      final dek2 = StiQRcloudCrypto.generateDek();
       expect(dek1.length, equals(32));
       expect(dek2.length, equals(32));
       expect(dek1, isNot(equals(dek2)));
     });
 
     test('Ed25519 Keypair generation, signing, and verification', () async {
-      final keyPair = await TestCloudCrypto.generateKeyPair();
-      final pubAddress = await TestCloudCrypto.getPublicAddress(keyPair);
+      final keyPair = await StiQRcloudCrypto.generateKeyPair();
+      final pubAddress = await StiQRcloudCrypto.getPublicAddress(keyPair);
 
       expect(pubAddress.length, equals(64)); // 32 bytes hex = 64 characters
 
-      final message = utf8.encode('TestCloud decentralized signature test');
-      final signature = await TestCloudCrypto.sign(message, keyPair);
+      final message = utf8.encode('StiQRcloud decentralized signature test');
+      final signature = await StiQRcloudCrypto.sign(message, keyPair);
 
       expect(signature.length, equals(128)); // 64 bytes hex = 128 characters
 
-      final isValid = await TestCloudCrypto.verify(message, signature, pubAddress);
+      final isValid = await StiQRcloudCrypto.verify(message, signature, pubAddress);
       expect(isValid, isTrue);
 
-      final isTamperedValid = await TestCloudCrypto.verify(
+      final isTamperedValid = await StiQRcloudCrypto.verify(
         utf8.encode('Tampered message'),
         signature,
         pubAddress,
@@ -35,10 +35,10 @@ void main() {
     });
 
     test('AES-256-GCM text encryption and decryption', () async {
-      final dek = TestCloudCrypto.generateDek();
-      const plainText = 'Confidential client payload stored in TestCloud mesh.';
+      final dek = StiQRcloudCrypto.generateDek();
+      const plainText = 'Confidential client payload stored in StiQRcloud mesh.';
 
-      final envelope = await TestCloudCrypto.encryptText(plainText, dek);
+      final envelope = await StiQRcloudCrypto.encryptText(plainText, dek);
       expect(envelope.ciphertext, isNotEmpty);
       expect(envelope.nonce, isNotEmpty);
       expect(envelope.mac, isNotEmpty);
@@ -52,45 +52,45 @@ void main() {
       expect(parsed!.ciphertext, equals(envelope.ciphertext));
 
       // Decrypt
-      final decrypted = await TestCloudCrypto.decryptText(parsed, dek);
+      final decrypted = await StiQRcloudCrypto.decryptText(parsed, dek);
       expect(decrypted, equals(plainText));
     });
 
     test('AES-256-GCM throws on invalid key or corrupted MAC', () async {
-      final dek1 = TestCloudCrypto.generateDek();
-      final dek2 = TestCloudCrypto.generateDek();
+      final dek1 = StiQRcloudCrypto.generateDek();
+      final dek2 = StiQRcloudCrypto.generateDek();
       const plainText = 'Top secret data';
 
-      final envelope = await TestCloudCrypto.encryptText(plainText, dek1);
+      final envelope = await StiQRcloudCrypto.encryptText(plainText, dek1);
 
       // Decrypt with wrong key
       expect(
-        () async => await TestCloudCrypto.decryptText(envelope, dek2),
-        throwsA(isA<TestCloudCryptoException>()),
+        () async => await StiQRcloudCrypto.decryptText(envelope, dek2),
+        throwsA(isA<StiQRcloudCryptoException>()),
       );
     });
 
     test('AES-256-GCM binary blob encryption and decryption', () async {
-      final dek = TestCloudCrypto.generateDek();
+      final dek = StiQRcloudCrypto.generateDek();
       final binaryData = List<int>.generate(1024, (i) => i % 256);
 
-      final encrypted = await TestCloudCrypto.encryptBytes(binaryData, dek);
+      final encrypted = await StiQRcloudCrypto.encryptBytes(binaryData, dek);
       expect(encrypted.length, greaterThan(binaryData.length));
 
-      final decrypted = await TestCloudCrypto.decryptBytes(encrypted, dek);
+      final decrypted = await StiQRcloudCrypto.decryptBytes(encrypted, dek);
       expect(decrypted, equals(binaryData));
     });
 
     test('generateUuidV7 generates valid RFC 9562 UUIDv7', () {
-      final id1 = TestCloudCrypto.generateUuidV7();
-      final id2 = TestCloudCrypto.generateUuidV7();
+      final id1 = StiQRcloudCrypto.generateUuidV7();
+      final id2 = StiQRcloudCrypto.generateUuidV7();
       final uuidv7Regex = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
 
       expect(uuidv7Regex.hasMatch(id1), isTrue, reason: 'id1 $id1 is not a valid UUIDv7');
       expect(uuidv7Regex.hasMatch(id2), isTrue, reason: 'id2 $id2 is not a valid UUIDv7');
       expect(id1, isNot(equals(id2)));
 
-      final staticId = TestCloudCrypto.generateId();
+      final staticId = StiQRcloudCrypto.generateId();
       expect(uuidv7Regex.hasMatch(staticId), isTrue);
     });
   });

@@ -117,9 +117,9 @@
   - Verified standalone offline mode and invariant Data ID guarantees via automated tests and live curl operations.
   - Initialized git repository with strict `.gitignore` rules, committed locally, and tagged with semantic version `v0.1.0`.
   - Built and archived production binaries in [releases/v0.1.0/](releases/v0.1.0/):
-    - `testcloud-linux-amd64`
-    - `testcloud-linux-arm64` (Raspberry Pi ARM)
-    - `testcloud-windows-amd64.exe` (Windows)
+    - `stiqrcloud-linux-amd64`
+    - `stiqrcloud-linux-arm64` (Raspberry Pi ARM)
+    - `stiqrcloud-windows-amd64.exe` (Windows)
   - Generated and verified SHA-256 release checksums in [releases/version.json](releases/version.json).
   - Staged and GitHub/stiqrhub ready (local-first; no remote push executed without user approval).
 - **Phase 5: Multi-Network 6-Node Mesh Cluster (Completed & Verified)**:
@@ -141,7 +141,7 @@
   - Deployed `torlando-tech/ble-reticulum` Protocol v2.2 interface into `~/.reticulum/interfaces/` with GATT service UUID `37145b00-442d-4a94-917f-8f42c5da28e3`.
   - Configured `~/.reticulum/config` with dual-mode `BLEInterface` (peripheral advertising + central scanning) and `TCPClientInterface` bridging into Node 1 (`127.10.1.1:4242`).
   - Implemented daemon management scripts: [scripts/start_ble_bridge.sh](scripts/start_ble_bridge.sh) and [scripts/stop_ble_bridge.sh](scripts/stop_ble_bridge.sh).
-  - Verified live Bluetooth LE advertising on host radio `F8:E4:E3:72:8E:85` and active TCP bridge into TestCloud.
+  - Verified live Bluetooth LE advertising on host radio `F8:E4:E3:72:8E:85` and active TCP bridge into StiQRcloud.
 
 ## 4. Current State & Resume Guide for Next Session
 
@@ -171,15 +171,15 @@
    - Download Endpoint: `/api/records/rec_0eaa67360f534521bffe7509_81485/file`.
 3. **Record 3 (Columba / Reticulum BLE Gateway)**:
    - Collection: `columba_messages`
-   - Ingress Path: Phone (Seth's S22) -> Bluetooth Low Energy (BLE) GATT -> Reticulum `ble-reticulum` -> Python Shared Instance -> [scripts/lxmf_testcloud_bot.py](scripts/lxmf_testcloud_bot.py) -> REST API (`127.10.1.1:8101`) -> 6-Node Distributed Cluster.
+   - Ingress Path: Phone (Seth's S22) -> Bluetooth Low Energy (BLE) GATT -> Reticulum `ble-reticulum` -> Python Shared Instance -> [scripts/lxmf_stiqrcloud_bot.py](scripts/lxmf_stiqrcloud_bot.py) -> REST API (`127.10.1.1:8101`) -> 6-Node Distributed Cluster.
 
 ### Bluetooth Low Energy (BLE) & LXMF Gateway Architecture
 - **Bluetooth Stack**: Native Reticulum BLE Interface (`ble-reticulum` with `bleak`, `bluezero`, `dbus-fast`).
 - **GATT Service UUID**: `37145b00-442d-4a94-917f-8f42c5da28e3`
 - **Bridge Script**: [scripts/start_ble_bridge.sh](scripts/start_ble_bridge.sh)
-- **LXMF Gateway Bot**: [scripts/lxmf_testcloud_bot.py](scripts/lxmf_testcloud_bot.py)
+- **LXMF Gateway Bot**: [scripts/lxmf_stiqrcloud_bot.py](scripts/lxmf_stiqrcloud_bot.py)
   - Destination Hash: `<0b0208f35b36830c10b635af6f063bf4>`
-  - Display Name: `TestCloud Gateway`
+  - Display Name: `StiQRcloud Gateway`
   - Re-announces every 20 seconds over BLE mesh.
   - Automatically stores received messages into collection `columba_messages` and replies with a cluster receipt ACK over Reticulum.
 
@@ -187,12 +187,12 @@
 - **Path**: [sdk/dart](sdk/dart)
 - **Status**: Completed, tested, and verified against live 6-node cluster (11/11 tests passing).
 - **Core Modules**:
-  - **`TestCloudCrypto`** ([sdk/dart/lib/src/crypto.dart](sdk/dart/lib/src/crypto.dart)):
+  - **`StiQRcloudCrypto`** ([sdk/dart/lib/src/crypto.dart](sdk/dart/lib/src/crypto.dart)):
     - Ed25519 keypair generation, public address derivation (`user_pub_address`), and cryptographic signing/verification.
     - AES-256-GCM symmetric authenticated encryption for text and binary file/picture blobs.
     - Auto-generation of 256-bit DEKs (Data Encryption Keys).
     - Envelope serialization format: `tc:enc:v1:<base64-json>`.
-  - **`TestCloudClient`** ([sdk/dart/lib/src/client.dart](sdk/dart/lib/src/client.dart)):
+  - **`StiQRcloudClient`** ([sdk/dart/lib/src/client.dart](sdk/dart/lib/src/client.dart)):
     - `getHealth()` & `getVersion()`
     - `createRecord()` with client-side Zero-Knowledge encryption and multipart file/picture upload.
     - `getRecord()` with automatic in-place decryption via DEK.
@@ -250,12 +250,12 @@
   - **Problem Solved**: Edge nodes running behind residential NAT/firewalls (e.g. friend's computer without port forwarding) advertise empty `PublicAddr: ""` to prevent loopback port collisions. Inbound push replication (`POST /api/internal/store`) was unable to reach them through home firewalls, leaving connected edge nodes with 0 records.
   - **Gateway Sync API (`GET /api/sync/records`)**: Added dedicated pull sync endpoint in [`pkg/gateway/server.go`](pkg/gateway/server.go) supporting `peer_id`, `since`, and `limit` query parameters with dynamic quorum backfilling for newly connected edge nodes.
   - **Content-Addressed Chunk Distribution (`GET /api/chunks/{hash}`)**: Added direct chunk retrieval endpoint in [`pkg/gateway/server.go`](pkg/gateway/server.go) and [`pkg/storage/store.go`](pkg/storage/store.go) enabling edge nodes to fetch raw file and picture chunks by hash without full record parsing.
-  - **Autonomous Client Pull Sync Loop**: Implemented `SyncRecordsFromPeers()` and `StartSyncLoop()` in [`pkg/p2p/swarm.go`](pkg/p2p/swarm.go) and [`cmd/testcloud/main.go`](cmd/testcloud/main.go). Runs an immediate sync on bootstrap/discovery connection and periodic checks every 10 seconds.
+  - **Autonomous Client Pull Sync Loop**: Implemented `SyncRecordsFromPeers()` and `StartSyncLoop()` in [`pkg/p2p/swarm.go`](pkg/p2p/swarm.go) and [`cmd/stiqrcloud/main.go`](cmd/stiqrcloud/main.go). Runs an immediate sync on bootstrap/discovery connection and periodic checks every 10 seconds.
   - **Idempotence & Caching**: Edge node inspects local store (`GetRecord` and `HasChunk`) before downloading chunks, ensuring zero network or CPU overhead when data is already mirrored.
   - **Verification**:
     - Integration test `TestEdgeNodeNATPullSync` passing in [`pkg/gateway/server_test.go`](pkg/gateway/server_test.go).
     - Multi-process CLI end-to-end binary tests verified record and chunk replication from Gateway to NAT Edge Node.
-    - All release static binaries compiled and archived (`testcloud`, `testcloud-linux-amd64`, `testcloud-linux-arm64`, `testcloud-windows-amd64.exe`).
+    - All release static binaries compiled and archived (`stiqrcloud`, `stiqrcloud-linux-amd64`, `stiqrcloud-linux-arm64`, `stiqrcloud-windows-amd64.exe`).
 
 - **Phase 8: Zero-Network-Impact Multi-Region Cluster Console & Interactive Live TUI (Completed & Verified)**:
   - **Problem Solved**: Deploying and observing 6 separate nodes across multiple terminals or browser tabs was cumbersome, and discovery calls to external LAN devices (`192.168.1.50:8100`) caused unwanted network traffic and potential slowdowns.
@@ -276,7 +276,7 @@
   - **Local-Only Access Control Middleware**: Implemented `isLocalRequest` and `localOnly` middleware in [`pkg/gateway/server.go`](pkg/gateway/server.go). Any request carrying Cloudflare headers (`CF-Ray`, `CF-Connecting-IP`, `CF-Visitor`), public `Host` headers (`stiqrcloud.stiqrnotes.com`), or originating from non-private IP addresses is rejected with `403 Forbidden`.
   - **Public Root Gateway Metadata**: Changed root `/` handler so that public internet visitors receive JSON gateway information rather than being redirected to the private operator dashboard.
   - **Live Verification on Physical Pi**:
-    - Cross-compiled ARM64 static binary (`testcloud-linux-arm64`) and deployed to `192.168.1.50:/opt/stiqrcloud/stiqrcloud`.
+    - Cross-compiled ARM64 static binary (`stiqrcloud-linux-arm64`) and deployed to `192.168.1.50:/opt/stiqrcloud/stiqrcloud`.
     - Restarted `stiqrcloud.service`.
     - Verified `https://stiqrcloud.stiqrnotes.com/dashboard` returns **HTTP 403 Forbidden**.
     - Verified `https://stiqrcloud.stiqrnotes.com/api/escrow/policy` returns **HTTP 403 Forbidden**.
@@ -301,7 +301,7 @@
   - **Outbound Discovery Rendezvous**: Node successfully registered with public rendezvous server `https://stiqrcloud.stiqrnotes.com`. Verified via Pi peer table:
     - Node ID: `workstation-node` (online, heartbeats every 3s).
     - Other active peers visible: `WindowsNode-2278`.
-  - **Reticulum Mesh Bridging**: Local `rnsd` daemon attached to `TCPInterface[TestCloud Gateway/127.10.1.1:4242]` (**Status: Up**), bridging the node into the global Reticulum mesh (`Air Barcelona Primary` & `Catz Node`).
+  - **Reticulum Mesh Bridging**: Local `rnsd` daemon attached to `TCPInterface[StiQRcloud Gateway/127.10.1.1:4242]` (**Status: Up**), bridging the node into the global Reticulum mesh (`Air Barcelona Primary` & `Catz Node`).
   - **Pull-Sync Verification**: Automatically synchronized 232 records from the network over outbound HTTPS without requiring port forwarding.
   - **Record Creation & Retrieval**: Created record `rec_975fe9fef8baf938e733e48d_45152` with Free Storage Agreement and invariant Merkle root.
   - **Local Dashboard**: Fully operational and protected at `http://localhost:8100/dashboard`.
@@ -315,7 +315,7 @@
   - **Verification**: Verified via `TestStoragePoliciesAndUserControl` in [`pkg/gateway/server_test.go`](pkg/gateway/server_test.go), confirming privacy airgap and custom route preservation.
 
 - **Phase 13: Official TypeScript & JavaScript Client SDK (`sdk/ts`) (Completed & Verified)**:
-  - **NPM Package**: Created `@stiqrhub/testcloud` in [`sdk/ts`](sdk/ts) with dual ESM/CJS build, complete TypeScript type definitions, and zero external runtime dependencies.
+  - **NPM Package**: Created `@stiqrhub/stiqrcloud` in [`sdk/ts`](sdk/ts) with dual ESM/CJS build, complete TypeScript type definitions, and zero external runtime dependencies.
   - **User-Owned Node Management (`NodeManager`)**:
     - Users can add their own local or self-hosted node (`addNode('http://localhost:8100')`).
     - Dynamic primary node switching and automatic failover.
@@ -324,7 +324,7 @@
     - `storagePolicy: 'local-only'` keeps data strictly on user's node.
     - `storagePolicy: 'replicated-2'` backs up to user's node + 2 peer nodes.
     - `storagePolicy: 'custom'` targets specific user-selected nodes via `storagePeers: [...]`.
-  - **Zero-Knowledge Encryption (`TestCloudCrypto`)**:
+  - **Zero-Knowledge Encryption (`StiQRcloudCrypto`)**:
     - AES-256-GCM encryption with 32-byte DEKs using native Web Crypto API.
     - Standard `tc:enc:v1:<base64-json>` envelope compatibility.
     - Ed25519 cryptographic keypair generation, signing, and verification.
@@ -388,9 +388,9 @@
   - **Release v0.2.0 Tagged & Archived**:
     - Bumped semantic versioning to `v0.2.0` in [`pkg/version/version.go`](pkg/version/version.go), [`releases/version.json`](releases/version.json), and [`README.md`](README.md).
     - Cross-compiled release binaries and generated cryptographic checksums in [`releases/v0.2.0/`](releases/v0.2.0):
-      - Linux ARM64 (Raspberry Pi): `releases/v0.2.0/testcloud-linux-arm64` (`d3cdefb28173fc1dd3af6f2b1b5724c4650214f7f36eb16259e852d59be0366b`)
-      - Linux amd64: `releases/v0.2.0/testcloud-linux-amd64` (`e2a33d07c30ac21fddae610685cf584e214120f500e46ff9f7155ecaf40da06f`)
-      - Windows amd64: `releases/v0.2.0/testcloud-windows-amd64.exe` (`de66192feca5949cb5012607895ab5e0e16d057693cb216ae1babd88544c7dac`)
+      - Linux ARM64 (Raspberry Pi): `releases/v0.2.0/stiqrcloud-linux-arm64` (`d3cdefb28173fc1dd3af6f2b1b5724c4650214f7f36eb16259e852d59be0366b`)
+      - Linux amd64: `releases/v0.2.0/stiqrcloud-linux-amd64` (`e2a33d07c30ac21fddae610685cf584e214120f500e46ff9f7155ecaf40da06f`)
+      - Windows amd64: `releases/v0.2.0/stiqrcloud-windows-amd64.exe` (`de66192feca5949cb5012607895ab5e0e16d057693cb216ae1babd88544c7dac`)
   - **Live Deployment to Raspberry Pi Server (`192.168.1.50`)**:
     - Backed up previous production binary on Pi (`stiqrcloud.v0.1.0.bak`).
     - Deployed new ARM64 binary via `scp` to `/opt/stiqrcloud/stiqrcloud`.
@@ -426,7 +426,7 @@
     - Verified binary FastCDC chunk replication: 32 KB chunk (`7bd67316...`) matched SHA-256 bit-for-bit across nodes.
     - Verified cross-node update propagation (version bump to v2) and Merkle audit challenge/responses.
   - **RFC 9562 UUIDv7 Client-Side Invariant ID Architecture**:
-    - Implemented `TestCloudCrypto.generateUuidV7()` in both `sdk/dart` and `sdk/ts`.
+    - Implemented `StiQRcloudCrypto.generateUuidV7()` in both `sdk/dart` and `sdk/ts`.
     - Guarantees millisecond time-ordered, monotonic, collision-proof 128-bit identifiers generated completely offline without network coordination.
     - Invariant `data_id` remains constant regardless of storage node audit failures or failover re-replication.
   - **Dart/Flutter SDK (`sdk/dart`) Complete Parity (`v0.2.0`)**:
@@ -440,7 +440,7 @@
     - Zero-dependency modern ES module built with Web Crypto API (`globalThis.crypto.subtle`).
     - Supports Node.js 18+, Bun, Deno, modern browsers, and React Native.
     - Fluent collection API (`client.collection('notes')` with `create`, `get`, `getOne`, `list`, `getList`, `update`, `delete`, and `ensureSchema`).
-    - Static `TestCloudClient.generateId()` helper.
+    - Static `StiQRcloudClient.generateId()` helper.
     - Automatic offline UUIDv7 generation and Ed25519 request signing.
     - 25/25 tests passing in `sdk/ts`.
   - **Concurrent Map Race Fix in Escrow**:

@@ -15,7 +15,7 @@
       "Node operator Abuse Blacklist to block abusive identities and Free Whitelist for sat-exempt storage",
       "Data owner designation of custom storage node RNode addresses or random auto-quorum selection"
     ],
-    "download_url": "https://github.com/stiqrhub/testcloud/releases/tag/v0.2.0",
+    "download_url": "https://github.com/stiqrhub/stiqrcloud/releases/tag/v0.2.0",
     "checksum_sha": "1993e00d7af11f7079d8ad986b50629a850299cad29970e5b3c641c4011fbd7f",
     "is_mandatory": false
   },
@@ -31,7 +31,7 @@
       "Pluggable Bitcoin Lightning Network micropayments & Mock LN Sandbox",
       "Local dark-mode dashboard with live telemetry and Settings Update Card"
     ],
-    "download_url": "https://github.com/stiqrhub/testcloud/releases/tag/v0.1.0",
+    "download_url": "https://github.com/stiqrhub/stiqrcloud/releases/tag/v0.1.0",
     "checksum_sha": "99c9f52458448593b5efde40a7a7c3e7d81d4980890104f5f9362ff397a9a7f6",
     "is_mandatory": false
   }

@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stiqrhub/testcloud/pkg/storage"
+	"github.com/stiqrhub/stiqrcloud/pkg/storage"
 )
 
 func TestSwarmSocialScoreAndQuorumSelection(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "testcloud_swarm_*")
+	tempDir, _ := os.MkdirTemp("", "stiqrcloud_swarm_*")
 	defer os.RemoveAll(tempDir)
 	store, _ := storage.NewStore(tempDir)
 
@@ -73,7 +73,7 @@ func TestUniversalDataIDRouting(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tempDir, _ := os.MkdirTemp("", "testcloud_routing_*")
+	tempDir, _ := os.MkdirTemp("", "stiqrcloud_routing_*")
 	defer os.RemoveAll(tempDir)
 	store, _ := storage.NewStore(tempDir)
 
@@ -97,7 +97,7 @@ func TestUniversalDataIDRouting(t *testing.T) {
 }
 
 func TestSelectQuorumForUserAffinityAndAdaptation(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "testcloud_affinity_*")
+	tempDir, _ := os.MkdirTemp("", "stiqrcloud_affinity_*")
 	defer os.RemoveAll(tempDir)
 	store, _ := storage.NewStore(tempDir)
 

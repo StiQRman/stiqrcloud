@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stiqrhub/testcloud/pkg/crypto"
-	"github.com/stiqrhub/testcloud/pkg/escrow"
-	"github.com/stiqrhub/testcloud/pkg/p2p"
-	"github.com/stiqrhub/testcloud/pkg/storage"
+	"github.com/stiqrhub/stiqrcloud/pkg/crypto"
+	"github.com/stiqrhub/stiqrcloud/pkg/escrow"
+	"github.com/stiqrhub/stiqrcloud/pkg/p2p"
+	"github.com/stiqrhub/stiqrcloud/pkg/storage"
 )
 
 func TestAuditorChallengeVerificationAndFailover(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "testcloud_audit_*")
+	tempDir, _ := os.MkdirTemp("", "stiqrcloud_audit_*")
 	defer os.RemoveAll(tempDir)
 
 	store, _ := storage.NewStore(tempDir)
@@ -77,7 +77,7 @@ func TestAuditorChallengeVerificationAndFailover(t *testing.T) {
 }
 
 func TestBatchedAuditCycleAndUserAffinityHealing(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "testcloud_batched_audit_*")
+	tempDir, _ := os.MkdirTemp("", "stiqrcloud_batched_audit_*")
 	defer os.RemoveAll(tempDir)
 
 	store, _ := storage.NewStore(tempDir)

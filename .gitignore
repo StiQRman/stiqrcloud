@@ -3,6 +3,10 @@
 /testcloud.exe
 /testcloud-arm64
 /testcloud-*
+/stiqrcloud
+/stiqrcloud.exe
+/stiqrcloud-arm64
+/stiqrcloud-*
 /bin/
 
 # Node Runtime Data

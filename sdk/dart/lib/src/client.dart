@@ -9,9 +9,9 @@ import 'models.dart';
 import 'node_manager.dart';
 import 'record_service.dart';
 
-/// Official client for interacting with a TestCloud node or cluster.
+/// Official client for interacting with a StiQRcloud node or cluster.
 /// Supports both Dart/Flutter mobile apps and desktop/web/server backends.
-class TestCloudClient {
+class StiQRcloudClient {
   final NodeManager nodeManager;
   final SimpleKeyPair? keyPair;
   final String? defaultStoragePolicy;
@@ -19,7 +19,7 @@ class TestCloudClient {
 
   String? _cachedPublicAddress;
 
-  TestCloudClient({
+  StiQRcloudClient({
     String? baseUrl,
     List<dynamic>? nodes,
     this.keyPair,
@@ -379,7 +379,7 @@ class TestCloudClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return;
     }
-    throw TestCloudApiException(
+    throw StiQRcloudApiException(
       response.statusCode,
       'Operation "$operation" failed with status code ${response.statusCode}',
       response.body,
@@ -390,3 +390,6 @@ class TestCloudClient {
     _client.close();
   }
 }
+
+// Backwards-compatible alias
+typedef TestCloudClient = StiQRcloudClient;

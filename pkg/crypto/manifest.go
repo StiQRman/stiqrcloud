@@ -41,7 +41,7 @@ type ChunkManifest struct {
 // CanonicalSignBytes generates the deterministic byte sequence used for signing the manifest.
 func (m *ChunkManifest) CanonicalSignBytes() []byte {
 	return []byte(fmt.Sprintf(
-		"testcloud:manifest:v1:%s:%d:%s:%d:%s:%s",
+		"stiqrcloud:manifest:v1:%s:%d:%s:%d:%s:%s",
 		m.DataID,
 		m.Version,
 		m.FileName,

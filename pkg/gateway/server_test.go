@@ -8,16 +8,16 @@ import (
 	"os"
 	"testing"
 
-	"github.com/stiqrhub/testcloud/pkg/audit"
-	"github.com/stiqrhub/testcloud/pkg/escrow"
-	"github.com/stiqrhub/testcloud/pkg/p2p"
-	"github.com/stiqrhub/testcloud/pkg/reticulum"
-	"github.com/stiqrhub/testcloud/pkg/storage"
-	"github.com/stiqrhub/testcloud/pkg/version"
+	"github.com/stiqrhub/stiqrcloud/pkg/audit"
+	"github.com/stiqrhub/stiqrcloud/pkg/escrow"
+	"github.com/stiqrhub/stiqrcloud/pkg/p2p"
+	"github.com/stiqrhub/stiqrcloud/pkg/reticulum"
+	"github.com/stiqrhub/stiqrcloud/pkg/storage"
+	"github.com/stiqrhub/stiqrcloud/pkg/version"
 )
 
 func TestGatewayAPIEndpointsAndInvariantDataID(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "testcloud_gw_*")
+	tempDir, _ := os.MkdirTemp("", "stiqrcloud_gw_*")
 	defer os.RemoveAll(tempDir)
 
 	store, _ := storage.NewStore(tempDir)
@@ -52,7 +52,7 @@ func TestGatewayAPIEndpointsAndInvariantDataID(t *testing.T) {
 	}
 
 	// 2. Create Record
-	payload := `{"collection":"notes","user_pub_address":"pubkey_alice","text":"Hello testcloud database"}`
+	payload := `{"collection":"notes","user_pub_address":"pubkey_alice","text":"Hello stiqrcloud database"}`
 	req = httptest.NewRequest("POST", "/api/records", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
@@ -101,7 +101,7 @@ func TestGatewayAPIEndpointsAndInvariantDataID(t *testing.T) {
 
 func TestEdgeNodeNATPullSync(t *testing.T) {
 	// 1. Setup Gateway Server
-	serverDir, err := os.MkdirTemp("", "testcloud_gw_sync_*")
+	serverDir, err := os.MkdirTemp("", "stiqrcloud_gw_sync_*")
 	if err != nil {
 		t.Fatalf("failed to create server temp dir: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestEdgeNodeNATPullSync(t *testing.T) {
 	_ = serverStore.SaveRecord(rec)
 
 	// 3. Setup Edge Node (behind NAT: localAddr is empty "")
-	edgeDir, err := os.MkdirTemp("", "testcloud_edge_*")
+	edgeDir, err := os.MkdirTemp("", "stiqrcloud_edge_*")
 	if err != nil {
 		t.Fatalf("failed to create edge temp dir: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestEdgeNodeNATPullSync(t *testing.T) {
 }
 
 func TestDashboardLocalOnlyProtection(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "testcloud_gw_dash_test_*")
+	tempDir, _ := os.MkdirTemp("", "stiqrcloud_gw_dash_test_*")
 	defer os.RemoveAll(tempDir)
 
 	store, _ := storage.NewStore(tempDir)
@@ -306,11 +306,11 @@ func TestDashboardLocalOnlyProtection(t *testing.T) {
 }
 
 func TestReticulumAPIEndpointsAndRecordReception(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "testcloud_rns_gw_*")
+	tempDir, _ := os.MkdirTemp("", "stiqrcloud_rns_gw_*")
 	defer os.RemoveAll(tempDir)
 
 	store, _ := storage.NewStore(tempDir)
-	id, _ := reticulum.NewIdentity("testcloud.node")
+	id, _ := reticulum.NewIdentity(reticulum.DefaultRNSAspect)
 	rnsMgr := reticulum.NewInterfaceManager(id)
 	defer rnsMgr.Stop()
 
@@ -370,7 +370,7 @@ func TestReticulumAPIEndpointsAndRecordReception(t *testing.T) {
 }
 
 func TestStoragePoliciesAndUserControl(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "testcloud_policy_*")
+	tempDir, _ := os.MkdirTemp("", "stiqrcloud_policy_*")
 	defer os.RemoveAll(tempDir)
 
 	store, _ := storage.NewStore(tempDir)

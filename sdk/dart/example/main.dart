@@ -1,17 +1,17 @@
-import 'package:testcloud/testcloud.dart';
+import 'package:stiqrcloud/testcloud.dart';
 
 void main() async {
   print('==================================================');
-  print('   TestCloud Client SDK (Dart & Flutter) Example  ');
+  print('   StiQRcloud Client SDK (Dart & Flutter) Example  ');
   print('==================================================\n');
 
   // 1. Initialize Client & Ed25519 Identity
   print('[1] Generating client-side Ed25519 identity keypair...');
-  final keyPair = await TestCloudCrypto.generateKeyPair();
-  final pubAddress = await TestCloudCrypto.getPublicAddress(keyPair);
+  final keyPair = await StiQRcloudCrypto.generateKeyPair();
+  final pubAddress = await StiQRcloudCrypto.getPublicAddress(keyPair);
   print('    Owner Public Key: $pubAddress\n');
 
-  final client = TestCloudClient(
+  final client = StiQRcloudClient(
     baseUrl: 'http://localhost:8101',
     keyPair: keyPair,
   );
@@ -37,7 +37,7 @@ void main() async {
 
     // 4. Create End-to-End Encrypted Record (Zero-Knowledge)
     print('[4] Creating End-to-End Encrypted record with AES-256-GCM...');
-    final dek = TestCloudCrypto.generateDek();
+    final dek = StiQRcloudCrypto.generateDek();
     const confidentialData = 'Patient Records #8812: Blood Type O+, Allergies: Penicillin.';
 
     final encRes = await client.createRecord(
@@ -63,7 +63,7 @@ void main() async {
 
     // 6. Demonstrate Universal Cross-Node Query
     print('[6] Querying from separate subnet peer (Node 5 on 127.10.5.1:8101)...');
-    final node5Client = TestCloudClient(baseUrl: 'http://127.10.5.1:8101');
+    final node5Client = StiQRcloudClient(baseUrl: 'http://127.10.5.1:8101');
     try {
       final crossResolved = await node5Client.getRecord(
         encRes.dataId,
@@ -77,7 +77,7 @@ void main() async {
     }
 
     print('==================================================');
-    print('   All TestCloud SDK operations completed!        ');
+    print('   All StiQRcloud SDK operations completed!        ');
     print('==================================================');
   } finally {
     client.close();

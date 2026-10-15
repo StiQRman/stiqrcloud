@@ -9,15 +9,15 @@ import (
 	"os"
 	"testing"
 
-	"github.com/stiqrhub/testcloud/pkg/audit"
-	"github.com/stiqrhub/testcloud/pkg/crypto"
-	"github.com/stiqrhub/testcloud/pkg/escrow"
-	"github.com/stiqrhub/testcloud/pkg/p2p"
-	"github.com/stiqrhub/testcloud/pkg/storage"
+	"github.com/stiqrhub/stiqrcloud/pkg/audit"
+	"github.com/stiqrhub/stiqrcloud/pkg/crypto"
+	"github.com/stiqrhub/stiqrcloud/pkg/escrow"
+	"github.com/stiqrhub/stiqrcloud/pkg/p2p"
+	"github.com/stiqrhub/stiqrcloud/pkg/storage"
 )
 
 func TestNodeEditVerificationAndAccessControl(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "testcloud_auth_test_*")
+	tempDir, err := os.MkdirTemp("", "stiqrcloud_auth_test_*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestNodeEditVerificationAndAccessControl(t *testing.T) {
 }
 
 func TestEnsureCollectionAndBlacklist(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "testcloud_col_test_*")
+	tempDir, err := os.MkdirTemp("", "stiqrcloud_col_test_*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
 	}

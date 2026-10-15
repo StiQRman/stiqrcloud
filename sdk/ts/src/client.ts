@@ -12,10 +12,10 @@ import {
   StoragePolicy,
 } from './models.js';
 import { NodeManager } from './node-manager.js';
-import { TestCloudApiException, TestCloudNotFoundError } from './errors.js';
-import { EncryptedEnvelope, TestCloudCrypto } from './crypto.js';
+import { StiQRcloudApiException, StiQRcloudNotFoundError } from './errors.js';
+import { EncryptedEnvelope, StiQRcloudCrypto } from './crypto.js';
 
-export interface TestCloudClientOptions {
+export interface StiQRcloudClientOptions {
   /**
    * Primary node URL. Can be the user's own local node ('http://localhost:8100'),
    * a home LAN Raspberry Pi ('http://192.168.1.50:8100'), or a public community gateway.
@@ -43,13 +43,13 @@ export interface TestCloudClientOptions {
   fetch?: typeof fetch;
 }
 
-export class TestCloudClient {
+export class StiQRcloudClient {
   public readonly nodeManager: NodeManager;
   public keyPair?: { publicKeyHex: string; privateKey: CryptoKey };
   public defaultStoragePolicy?: StoragePolicy;
   private readonly _fetch: typeof fetch;
 
-  constructor(options?: TestCloudClientOptions) {
+  constructor(options?: StiQRcloudClientOptions) {
     this._fetch = options?.fetch ?? globalThis.fetch.bind(globalThis);
     this.keyPair = options?.keyPair;
     this.defaultStoragePolicy = options?.defaultStoragePolicy;
@@ -65,7 +65,7 @@ export class TestCloudClient {
    * Time-ordered, monotonic, and offline-safe.
    */
   static generateId(): string {
-    return TestCloudCrypto.generateUuidV7();
+    return StiQRcloudCrypto.generateUuidV7();
   }
 
   /**
@@ -125,17 +125,17 @@ export class TestCloudClient {
 
     // 1. Client-Side End-to-End Encryption
     if (options.encrypt) {
-      activeDek = activeDek || TestCloudCrypto.generateDek();
+      activeDek = activeDek || StiQRcloudCrypto.generateDek();
 
       if (processedText.length > 0) {
-        const envelope = await TestCloudCrypto.encryptText(processedText, activeDek);
+        const envelope = await StiQRcloudCrypto.encryptText(processedText, activeDek);
         processedText = envelope.encode();
       }
       if (processedFile && processedFile.length > 0) {
-        processedFile = await TestCloudCrypto.encryptBytes(processedFile, activeDek);
+        processedFile = await StiQRcloudCrypto.encryptBytes(processedFile, activeDek);
       }
       if (processedPic && processedPic.length > 0) {
-        processedPic = await TestCloudCrypto.encryptBytes(processedPic, activeDek);
+        processedPic = await StiQRcloudCrypto.encryptBytes(processedPic, activeDek);
       }
     }
 
@@ -144,10 +144,10 @@ export class TestCloudClient {
     let signature = '';
     if (this.keyPair) {
       const signMessage = new TextEncoder().encode(`${options.collection}:${processedText}:${pubAddr}`);
-      signature = await TestCloudCrypto.sign(signMessage, this.keyPair.privateKey);
+      signature = await StiQRcloudCrypto.sign(signMessage, this.keyPair.privateKey);
     }
 
-    const dataId = options.dataId || TestCloudCrypto.generateUuidV7();
+    const dataId = options.dataId || StiQRcloudCrypto.generateUuidV7();
 
     // 3. Dispatch: multipart/form-data if binary attachments present; otherwise JSON
     let response: Response;
@@ -232,7 +232,7 @@ export class TestCloudClient {
 
     if (res.status === 404) {
       const body = await res.text();
-      throw new TestCloudNotFoundError(dataId, body);
+      throw new StiQRcloudNotFoundError(dataId, body);
     }
     await this.checkResponse(res, 'getRecord');
     const record = await res.json() as Record;
@@ -240,7 +240,7 @@ export class TestCloudClient {
     if (options?.decrypt && options.dek && record.text) {
       const envelope = EncryptedEnvelope.tryParse(record.text);
       if (envelope) {
-        const decryptedText = await TestCloudCrypto.decryptText(envelope, options.dek);
+        const decryptedText = await StiQRcloudCrypto.decryptText(envelope, options.dek);
         return {
           ...record,
           text: decryptedText,
@@ -287,7 +287,7 @@ export class TestCloudClient {
     const bytes = new Uint8Array(arrayBuffer);
 
     if (options?.decrypt && options.dek) {
-      return await TestCloudCrypto.decryptBytes(bytes, options.dek);
+      return await StiQRcloudCrypto.decryptBytes(bytes, options.dek);
     }
     return bytes;
   }
@@ -306,7 +306,7 @@ export class TestCloudClient {
     const bytes = new Uint8Array(arrayBuffer);
 
     if (options?.decrypt && options.dek) {
-      return await TestCloudCrypto.decryptBytes(bytes, options.dek);
+      return await StiQRcloudCrypto.decryptBytes(bytes, options.dek);
     }
     return bytes;
   }
@@ -376,7 +376,7 @@ export class TestCloudClient {
 
         const body: globalThis.Record<string, any> = { ...data };
         if (!body.data_id && !body.id) {
-          const generatedId = TestCloudCrypto.generateUuidV7();
+          const generatedId = StiQRcloudCrypto.generateUuidV7();
           body.data_id = generatedId;
           body.id = generatedId;
         } else if (body.data_id && !body.id) {
@@ -434,7 +434,7 @@ export class TestCloudClient {
 
           if (client.keyPair) {
             const signBytes = new TextEncoder().encode(`${id}:update`);
-            const sig = await TestCloudCrypto.sign(signBytes, client.keyPair.privateKey);
+            const sig = await StiQRcloudCrypto.sign(signBytes, client.keyPair.privateKey);
             headers['X-User-Signature'] = sig;
             body.signature = sig;
           }
@@ -461,7 +461,7 @@ export class TestCloudClient {
 
           if (client.keyPair) {
             const signBytes = new TextEncoder().encode(`delete:${id}`);
-            const sig = await TestCloudCrypto.sign(signBytes, client.keyPair.privateKey);
+            const sig = await StiQRcloudCrypto.sign(signBytes, client.keyPair.privateKey);
             headers['X-User-Signature'] = sig;
           }
         }
@@ -539,10 +539,15 @@ export class TestCloudClient {
   private async checkResponse(response: Response, operation: string): Promise<void> {
     if (response.ok) return;
     const body = await response.text();
-    throw new TestCloudApiException(
+    throw new StiQRcloudApiException(
       response.status,
       `Operation "${operation}" failed`,
       body
     );
   }
 }
+
+// Backwards-compatible aliases
+export const TestCloudClient = StiQRcloudClient;
+export type TestCloudClient = StiQRcloudClient;
+export type TestCloudClientOptions = StiQRcloudClientOptions;

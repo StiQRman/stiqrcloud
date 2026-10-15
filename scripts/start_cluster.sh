@@ -2,17 +2,17 @@
 set -e
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$BASE_DIR/testcloud"
+BIN="$BASE_DIR/stiqrcloud"
 DATA_ROOT="$BASE_DIR/data/cluster"
 LOG_ROOT="$BASE_DIR/data/logs"
 
 mkdir -p "$DATA_ROOT" "$LOG_ROOT"
 
-echo "=== Building TestCloud Binary ==="
-(cd "$BASE_DIR" && go build -o testcloud ./cmd/testcloud)
+echo "=== Building StiQRcloud Binary ==="
+(cd "$BASE_DIR" && go build -o stiqrcloud ./cmd/stiqrcloud)
 
 echo "=== Stopping Any Existing Nodes ==="
-pkill -x "testcloud" 2>/dev/null || true
+pkill -x "stiqrcloud" 2>/dev/null || true
 pkill -f "scripts/localhost_proxy.py" 2>/dev/null || true
 sleep 0.5
 
@@ -23,7 +23,7 @@ cleanup() {
   echo "=== Shutting down 6-Node Cluster ==="
   trap - SIGINT SIGTERM SIGHUP EXIT
   kill "${PIDS[@]}" 2>/dev/null || true
-  pkill -x "testcloud" 2>/dev/null || true
+  pkill -x "stiqrcloud" 2>/dev/null || true
   exit 0
 }
 
@@ -54,6 +54,9 @@ echo "Starting Node 1: Alice (Dallas, TX | IP: 104.200.134.8) on 127.10.1.1:8101
   > "$LOG_ROOT/node1.log" 2>&1 &
 PIDS+=($!)
 sleep 0.4
+
+python3 "$BASE_DIR/scripts/localhost_proxy.py" > "$LOG_ROOT/proxy.log" 2>&1 &
+PIDS+=($!)
 
 # Node 2: Bob (New York, NY - Co-Auditor 2)
 echo "Starting Node 2: Bob (New York, NY | IP: 199.195.250.77) on 127.10.2.1:8101..."

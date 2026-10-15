@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stiqrhub/testcloud/pkg/crypto"
+	"github.com/stiqrhub/stiqrcloud/pkg/crypto"
 )
 
 func TestStandaloneDatabaseCRUDAndInvariantDataID(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "testcloud_db_*")
+	tempDir, err := os.MkdirTemp("", "stiqrcloud_db_*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestStandaloneDatabaseCRUDAndInvariantDataID(t *testing.T) {
 }
 
 func TestExpiredContractEvictionWhenStorageFull(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "testcloud_evict_*")
+	tempDir, err := os.MkdirTemp("", "stiqrcloud_evict_*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
 	}

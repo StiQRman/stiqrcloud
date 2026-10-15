@@ -1,6 +1,6 @@
-# TestCloud TypeScript & JavaScript SDK (`@stiqrhub/testcloud`)
+# StiQRcloud TypeScript & JavaScript SDK (`@stiqrhub/stiqrcloud`)
 
-The official TypeScript and JavaScript client SDK for **TestCloud** decentralized storage mesh and Reticulum backbone.
+The official TypeScript and JavaScript client SDK for **StiQRcloud** decentralized storage mesh and Reticulum backbone.
 
 Works seamlessly in **Node.js (18+)**, **modern web browsers**, **React**, **Vue**, **Svelte**, and **React Native** with zero external runtime dependencies.
 
@@ -24,7 +24,7 @@ Works seamlessly in **Node.js (18+)**, **modern web browsers**, **React**, **Vue
 ## Installation
 
 ```bash
-npm install @stiqrhub/testcloud
+npm install @stiqrhub/stiqrcloud
 ```
 
 ---
@@ -34,10 +34,10 @@ npm install @stiqrhub/testcloud
 ### 1. Connect to Your Own Node
 
 ```typescript
-import { TestCloudClient } from '@stiqrhub/testcloud';
+import { StiQRcloudClient } from '@stiqrhub/stiqrcloud';
 
 // Connect to the user's local node
-const client = new TestCloudClient({
+const client = new StiQRcloudClient({
   baseUrl: 'http://localhost:8100',
   defaultStoragePolicy: 'local-only', // Default to keeping data strictly on their node
 });

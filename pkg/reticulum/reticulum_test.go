@@ -8,7 +8,7 @@ import (
 )
 
 func TestReticulumIdentityAndDestination(t *testing.T) {
-	id, err := NewIdentity("testcloud.node")
+	id, err := NewIdentity("stiqrcloud.node")
 	if err != nil {
 		t.Fatalf("NewIdentity failed: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestReticulumIdentityAndDestination(t *testing.T) {
 }
 
 func TestReticulumAnnounceAndVerify(t *testing.T) {
-	id, err := NewIdentity("testcloud.node")
+	id, err := NewIdentity("stiqrcloud.node")
 	if err != nil {
 		t.Fatalf("NewIdentity failed: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestReticulumAnnounceAndVerify(t *testing.T) {
 }
 
 func TestReticulumPacketFraming(t *testing.T) {
-	id, _ := NewIdentity("testcloud.node")
+	id, _ := NewIdentity("stiqrcloud.node")
 	dest := id.Destination()
 
 	originalPacket := &Packet{
@@ -65,7 +65,7 @@ func TestReticulumPacketFraming(t *testing.T) {
 		Hops:        0x02,
 		Destination: dest,
 		Context:     0x00,
-		Payload:     []byte("testcloud query record-xyz"),
+		Payload:     []byte("stiqrcloud query record-xyz"),
 	}
 
 	encoded := EncodePacket(originalPacket)
@@ -92,7 +92,7 @@ func TestHDLCFramingAndTCPServer(t *testing.T) {
 	}
 
 	// 2. Test TCP Server Interface with HDLC framed Announce
-	serverID, _ := NewIdentity("testcloud.server")
+	serverID, _ := NewIdentity("stiqrcloud.server")
 	mgr := NewInterfaceManager(serverID)
 	port := 24242
 	if err := mgr.StartTCPAddr("127.0.0.1", port); err != nil {
@@ -122,7 +122,7 @@ func TestHDLCFramingAndTCPServer(t *testing.T) {
 
 func TestReticulumClientAndDirectPacketTransfer(t *testing.T) {
 	// Node 1 (Server/Hub)
-	hubID, _ := NewIdentity("testcloud.hub")
+	hubID, _ := NewIdentity("stiqrcloud.hub")
 	hubMgr := NewInterfaceManager(hubID)
 	port := 25252
 	if err := hubMgr.StartTCPAddr("127.0.0.1", port); err != nil {
@@ -138,7 +138,7 @@ func TestReticulumClientAndDirectPacketTransfer(t *testing.T) {
 	})
 
 	// Node 2 (Client)
-	clientID, _ := NewIdentity("testcloud.client")
+	clientID, _ := NewIdentity("stiqrcloud.client")
 	clientMgr := NewInterfaceManager(clientID)
 	defer clientMgr.Stop()
 

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stiqrhub/testcloud/pkg/crypto"
+	"github.com/stiqrhub/stiqrcloud/pkg/crypto"
 )
 
 type AccessPermission string

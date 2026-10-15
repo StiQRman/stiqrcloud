@@ -216,7 +216,7 @@ class NodeHealth {
   factory NodeHealth.fromJson(Map<String, dynamic> json) {
     return NodeHealth(
       status: json['status'] as String? ?? 'unknown',
-      appName: json['app_name'] as String? ?? 'testcloud',
+      appName: json['app_name'] as String? ?? 'stiqrcloud',
       version: json['version'] as String? ?? '',
       nodeId: json['node_id'] as String? ?? '',
       rnsDest: json['rns_dest'] as String?,

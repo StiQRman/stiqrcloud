@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TestCloud 6-Node Multi-Region Cluster Console & Live Monitor
+StiQRcloud 6-Node Multi-Region Cluster Console & Live Monitor
 Zero Network Overhead | Isolated Linux Loopback Subnets | Multi-Region WAN Simulation
 """
 
@@ -17,7 +17,7 @@ import threading
 from collections import deque
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-BIN_PATH = os.path.join(BASE_DIR, "testcloud")
+BIN_PATH = os.path.join(BASE_DIR, "stiqrcloud")
 DATA_ROOT = os.path.join(BASE_DIR, "data", "cluster")
 LOG_ROOT = os.path.join(BASE_DIR, "data", "logs")
 
@@ -142,9 +142,9 @@ class ClusterManager:
             }
 
     def build_binary(self):
-        if not os.path.exists(BIN_PATH) or os.path.getmtime(BIN_PATH) < os.path.getmtime(os.path.join(BASE_DIR, "cmd", "testcloud", "main.go")):
-            self.add_log("System", "Compiling fresh TestCloud binary...")
-            cmd = ["go", "build", "-o", BIN_PATH, "./cmd/testcloud"]
+        if not os.path.exists(BIN_PATH) or os.path.getmtime(BIN_PATH) < os.path.getmtime(os.path.join(BASE_DIR, "cmd", "stiqrcloud", "main.go")):
+            self.add_log("System", "Compiling fresh StiQRcloud binary...")
+            cmd = ["go", "build", "-o", BIN_PATH, "./cmd/stiqrcloud"]
             res = subprocess.run(cmd, cwd=BASE_DIR, capture_output=True, text=True)
             if res.returncode != 0:
                 self.add_log("System", f"Build failed: {res.stderr}")
@@ -252,7 +252,7 @@ class ClusterManager:
         for idx in list(self.procs.keys()):
             self.stop_node(idx)
         # Kill any remaining testcloud processes
-        subprocess.run(["pkill", "-x", "testcloud"], capture_output=True)
+        subprocess.run(["pkill", "-x", "stiqrcloud"], capture_output=True)
 
     def set_notification(self, msg):
         self.notification = msg
@@ -353,7 +353,7 @@ class ClusterManager:
             stdscr.erase()
 
             # 1. Header Bar
-            header = " TESTCLOUD MULTI-REGION CLUSTER | 100% LOOPBACK ISOLATED (0% NETWORK LOAD) "
+            header = " STIQRCLOUD MULTI-REGION CLUSTER | 100% LOOPBACK ISOLATED (0% NETWORK LOAD) "
             try:
                 stdscr.addstr(0, 0, header.center(max_x)[:max_x-1], curses.color_pair(7) | curses.A_BOLD)
             except curses.error:
@@ -502,7 +502,7 @@ class ClusterManager:
         while self.running:
             os.system("clear")
             print("=" * 105)
-            print("      TESTCLOUD MULTI-REGION CLUSTER | 100% LOOPBACK ISOLATED (ZERO NETWORK LOAD)")
+            print("      STIQRCLOUD MULTI-REGION CLUSTER | 100% LOOPBACK ISOLATED (ZERO NETWORK LOAD)")
             print("=" * 105)
             print(f"{'#':<3}{'NODE':<9}{'ROLE':<19}{'LOCATION':<17}{'SIMULATED WAN IP':<18}{'LOCAL ADDR':<17}{'STATUS':<11}{'RECS':<6}{'LAT'}")
             print("-" * 105)
@@ -532,7 +532,7 @@ class ClusterManager:
 def main():
     manager = ClusterManager()
     if not manager.build_binary():
-        print("Failed to build testcloud binary.")
+        print("Failed to build stiqrcloud binary.")
         sys.exit(1)
 
     print("Starting 6-node multi-region cluster on isolated loopback...")

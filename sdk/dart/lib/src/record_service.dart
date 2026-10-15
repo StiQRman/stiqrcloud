@@ -9,14 +9,14 @@ import 'models.dart';
 ///
 /// Example:
 /// ```dart
-/// final client = TestCloudClient(baseUrl: 'http://192.168.1.50:8100');
+/// final client = StiQRcloudClient(baseUrl: 'http://192.168.1.50:8100');
 /// final record = await client.collection('notes').create({
 ///   'title': 'My First Decentralized Note',
 ///   'body': 'Encrypted end-to-end!',
 /// });
 /// ```
 class RecordService {
-  final TestCloudClient _client;
+  final StiQRcloudClient _client;
   final String collectionName;
 
   RecordService(this._client, this.collectionName);
@@ -50,7 +50,7 @@ class RecordService {
     final effFileName = fileName ?? options?.fileName;
     final effPicBytes = pictureBytes ?? options?.pictureBytes;
     final effPicName = pictureName ?? options?.pictureName;
-    final effId = id ?? options?.id ?? data['data_id'] ?? data['id'] ?? TestCloudCrypto.generateUuidV7();
+    final effId = id ?? options?.id ?? data['data_id'] ?? data['id'] ?? StiQRcloudCrypto.generateUuidV7();
 
     final endpoint = await _client.nodeManager.resolveEndpoint(effNodeUrl);
 
@@ -67,12 +67,12 @@ class RecordService {
 
     // Client-side encryption if requested
     if (effEncrypt) {
-      final activeDek = effDek != null ? effDek : TestCloudCrypto.generateDek();
+      final activeDek = effDek != null ? effDek : StiQRcloudCrypto.generateDek();
       if (body.containsKey('text') && body['text'] is String) {
-        final env = await TestCloudCrypto.encryptText(body['text'] as String, activeDek);
+        final env = await StiQRcloudCrypto.encryptText(body['text'] as String, activeDek);
         body['text'] = env.encode();
       } else if (body.containsKey('content') && body['content'] is String) {
-        final env = await TestCloudCrypto.encryptText(body['content'] as String, activeDek);
+        final env = await StiQRcloudCrypto.encryptText(body['content'] as String, activeDek);
         body['content'] = env.encode();
       }
     }
@@ -185,7 +185,7 @@ class RecordService {
 
       if (_client.keyPair != null) {
         final signBytes = utf8.encode('$id:update');
-        final sig = await TestCloudCrypto.sign(signBytes, _client.keyPair!);
+        final sig = await StiQRcloudCrypto.sign(signBytes, _client.keyPair!);
         headers['X-User-Signature'] = sig;
         body['signature'] = sig;
       }
@@ -215,7 +215,7 @@ class RecordService {
 
       if (_client.keyPair != null) {
         final signBytes = utf8.encode('delete:$id');
-        final sig = await TestCloudCrypto.sign(signBytes, _client.keyPair!);
+        final sig = await StiQRcloudCrypto.sign(signBytes, _client.keyPair!);
         headers['X-User-Signature'] = sig;
       }
     }

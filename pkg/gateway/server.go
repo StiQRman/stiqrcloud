@@ -17,14 +17,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/stiqrhub/testcloud/pkg/audit"
-	"github.com/stiqrhub/testcloud/pkg/crypto"
-	"github.com/stiqrhub/testcloud/pkg/dashboard"
-	"github.com/stiqrhub/testcloud/pkg/escrow"
-	"github.com/stiqrhub/testcloud/pkg/p2p"
-	"github.com/stiqrhub/testcloud/pkg/reticulum"
-	"github.com/stiqrhub/testcloud/pkg/storage"
-	"github.com/stiqrhub/testcloud/pkg/version"
+	"github.com/stiqrhub/stiqrcloud/pkg/audit"
+	"github.com/stiqrhub/stiqrcloud/pkg/crypto"
+	"github.com/stiqrhub/stiqrcloud/pkg/dashboard"
+	"github.com/stiqrhub/stiqrcloud/pkg/escrow"
+	"github.com/stiqrhub/stiqrcloud/pkg/p2p"
+	"github.com/stiqrhub/stiqrcloud/pkg/reticulum"
+	"github.com/stiqrhub/stiqrcloud/pkg/storage"
+	"github.com/stiqrhub/stiqrcloud/pkg/version"
 )
 
 // Server coordinates HTTP API routing and services.
@@ -258,7 +258,7 @@ func (s *Server) setupRoutes() {
 				"app_name":    version.AppName,
 				"version":     version.CurrentVersion,
 				"status":      "ok",
-				"message":     "TestCloud Decentralized Public Gateway & Discovery Rendezvous.",
+				"message":     "StiQRcloud Decentralized Public Gateway & Discovery Rendezvous.",
 				"node_id":     s.nodeID,
 				"health":      "/api/health",
 				"peers":       "/api/peers",
@@ -352,7 +352,7 @@ func (s *Server) localOnly(next http.HandlerFunc) http.HandlerFunc {
 <body>
   <div class="card">
     <h1>403 Forbidden</h1>
-    <p>The TestCloud Node Dashboard is restricted to local network access only.</p>
+    <p>The StiQRcloud Node Dashboard is restricted to local network access only.</p>
     <p>Administrative and telemetry views cannot be accessed over the public internet gateway. To access your dashboard, connect directly via your local LAN address:</p>
     <p><code>http://&lt;local-ip&gt;:&lt;port&gt;/dashboard</code></p>
   </div>
@@ -382,7 +382,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"code":        200,
 		"status":      "ok",
-		"message":     "TestCloud decentralized backend is healthy.",
+		"message":     "StiQRcloud decentralized backend is healthy.",
 		"app_name":    version.AppName,
 		"version":     version.CurrentVersion,
 		"node_id":     s.nodeID,
@@ -1230,7 +1230,7 @@ func formatPBRecord(rec *storage.Record) map[string]interface{} {
 		_ = json.Unmarshal([]byte(trimmed), &res)
 	}
 
-	// Ensure PocketBase and TestCloud standard fields are present
+	// Ensure PocketBase and StiQRcloud standard fields are present
 	res["id"] = rec.DataID
 	res["data_id"] = rec.DataID
 	res["collectionId"] = rec.Collection
@@ -1431,11 +1431,11 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 			if sub == "auth-with-password" || sub == "auth-with-oauth2" {
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]interface{}{
-					"token": "testcloud_mock_jwt_token",
+					"token": "stiqrcloud_mock_jwt_token",
 					"record": map[string]interface{}{
 						"id":       "user_local_owner",
-						"email":    "owner@testcloud.mesh",
-						"name":     "TestCloud Owner",
+						"email":    "owner@stiqrcloud.mesh",
+						"name":     "StiQRcloud Owner",
 						"verified": true,
 					},
 				})
@@ -2261,7 +2261,7 @@ func (s *Server) handleReticulumAnnounce(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Reticulum stack is not initialized", http.StatusBadRequest)
 		return
 	}
-	if err := s.rnsManager.Announce([]byte("testcloud.node")); err != nil {
+	if err := s.rnsManager.Announce([]byte(reticulum.DefaultRNSAspect)); err != nil {
 		http.Error(w, fmt.Sprintf("announce failed: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -2290,8 +2290,8 @@ func (s *Server) handleReticulumStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	filename := strings.TrimPrefix(r.URL.Path, "/download/")
 	filename = strings.Trim(filename, "/")
-	if filename == "" || filename == "testcloud" || filename == "stiqrcloud" {
-		filename = "testcloud-linux-amd64"
+	if filename == "" || filename == "stiqrcloud" || filename == "testcloud" {
+		filename = "stiqrcloud-linux-amd64"
 	}
 
 	// Search locations for the requested binary
@@ -2299,9 +2299,12 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		filename,
 		filepath.Join(".", filename),
 		filepath.Join("releases", filename),
+		filepath.Join("releases", "v0.2.0", filename),
 		filepath.Join("releases_storage", filename),
 		filepath.Join("/opt/stiqrhub/releases_storage", filename),
 		filepath.Join("/opt/stiqrcloud", filename),
+		filepath.Join("./stiqrcloud", filename),
+		filepath.Join("./stiqrcloud/releases/v0.2.0", filename),
 		filepath.Join("./testcloud", filename),
 		filepath.Join("./StiQRhub/releases_storage", filename),
 	}
@@ -2338,14 +2341,14 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 
 	script := fmt.Sprintf(`#!/usr/bin/env bash
 # ==============================================================================
-# TestCloud Universal One-Line Installer
+# StiQRcloud Universal One-Line Installer
 # Runs on Linux VMs (Windows WSL, VirtualBox, VMware), PCs, and servers.
 # Zero port forwarding required - connects outbound via Discovery Rendezvous.
 # ==============================================================================
 set -e
 
 echo "=================================================================="
-echo "          Installing TestCloud Decentralized Node                 "
+echo "          Installing StiQRcloud Decentralized Node                 "
 echo "=================================================================="
 
 ARCH="$(uname -m)"
@@ -2358,14 +2361,14 @@ if [ "$OS" != "linux" ]; then
   exit 1
 fi
 
-BIN_FILE="testcloud-linux-amd64"
+BIN_FILE="stiqrcloud-linux-amd64"
 case "$ARCH" in
   x86_64|amd64)
-    BIN_FILE="testcloud-linux-amd64"
+    BIN_FILE="stiqrcloud-linux-amd64"
     echo "-> Architecture: Linux x86_64"
     ;;
   aarch64|arm64)
-    BIN_FILE="testcloud-linux-arm64"
+    BIN_FILE="stiqrcloud-linux-arm64"
     echo "-> Architecture: Linux ARM64"
     ;;
   *)
@@ -2373,15 +2376,15 @@ case "$ARCH" in
     ;;
 esac
 
-DEST_DIR="$HOME/.testcloud"
+DEST_DIR="$HOME/.stiqrcloud"
 mkdir -p "$DEST_DIR"
-TARGET_BIN="$DEST_DIR/testcloud"
+TARGET_BIN="$DEST_DIR/stiqrcloud"
 
 echo "-> Downloading static binary from %s..."
 if command -v curl >/dev/null 2>&1; then
-  curl -sSLf "%s/download/$BIN_FILE" -o "$TARGET_BIN" || curl -sSLf "%s/download/testcloud" -o "$TARGET_BIN"
+  curl -sSLf "%s/download/$BIN_FILE" -o "$TARGET_BIN" || curl -sSLf "%s/download/stiqrcloud" -o "$TARGET_BIN"
 elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$TARGET_BIN" "%s/download/$BIN_FILE" || wget -qO "$TARGET_BIN" "%s/download/testcloud"
+  wget -qO "$TARGET_BIN" "%s/download/$BIN_FILE" || wget -qO "$TARGET_BIN" "%s/download/stiqrcloud"
 else
   echo "Error: curl or wget is required to download the binary."
   exit 1
@@ -2399,11 +2402,11 @@ while command -v ss >/dev/null 2>&1 && ss -ulpn 2>/dev/null | grep -q ":$RNS_POR
   RNS_PORT=$((RNS_PORT+1))
 done
 
-NODE_NAME="${TESTCLOUD_NAME:-FriendNode-$(hostname -s 2>/dev/null || echo "VM")-$RANDOM}"
+NODE_NAME="${STIQRCLOUD_NAME:-FriendNode-$(hostname -s 2>/dev/null || echo "VM")-$RANDOM}"
 DISCOVERY_URL="%s"
 
 echo "=================================================================="
-echo "-> Starting TestCloud node '$NODE_NAME'..."
+echo "-> Starting StiQRcloud node '$NODE_NAME'..."
 echo "-> Connecting to discovery rendezvous: $DISCOVERY_URL"
 echo "-> Private Dashboard active at: http://localhost:$PORT/dashboard"
 echo "=================================================================="
@@ -2432,16 +2435,16 @@ func (s *Server) handlePowerShellScript(w http.ResponseWriter, r *http.Request) 
 	}
 	baseURL := fmt.Sprintf("%s://%s", proto, host)
 
-	script := fmt.Sprintf(`# TestCloud Windows PowerShell Installer & Launcher
-$destDir = "$HOME\.testcloud"
+	script := fmt.Sprintf(`# StiQRcloud Windows PowerShell Installer & Launcher
+$destDir = "$HOME\.stiqrcloud"
 New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-$binPath = "$destDir\testcloud.exe"
+$binPath = "$destDir\stiqrcloud.exe"
 
 Write-Host "=================================================================="
-Write-Host "          Installing TestCloud Decentralized Node (Windows)       "
+Write-Host "          Installing StiQRcloud Decentralized Node (Windows)       "
 Write-Host "=================================================================="
 
-Get-Process -Name "testcloud*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name "stiqrcloud*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 600
 try {
     $conn = Get-NetTCPConnection -LocalPort 8100 -ErrorAction SilentlyContinue
@@ -2454,13 +2457,13 @@ Remove-Item -Path $binPath -Force -ErrorAction SilentlyContinue
 
 $randomId = Get-Random -Minimum 1000 -Maximum 9999
 
-Write-Host "-> Downloading latest TestCloud for Windows..."
-Invoke-WebRequest -Uri "%s/download/testcloud-windows-amd64.exe?v=$randomId" -OutFile $binPath
+Write-Host "-> Downloading latest StiQRcloud for Windows..."
+Invoke-WebRequest -Uri "%s/download/stiqrcloud-windows-amd64.exe?v=$randomId" -OutFile $binPath
 
 $nodeName = "WindowsNode-$randomId"
 $discoveryUrl = "%s"
 
-Write-Host "-> Starting TestCloud node '$nodeName'..."
+Write-Host "-> Starting StiQRcloud node '$nodeName'..."
 Write-Host "-> Connecting to discovery rendezvous: $discoveryUrl"
 Write-Host "-> Reticulum Mesh Gateway: 176.84.102.17:4242 (Air Barcelona)"
 Write-Host "-> Private Dashboard active at: http://localhost:8100/dashboard"

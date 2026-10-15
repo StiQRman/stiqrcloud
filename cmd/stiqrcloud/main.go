@@ -14,13 +14,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/stiqrhub/testcloud/pkg/audit"
-	"github.com/stiqrhub/testcloud/pkg/escrow"
-	"github.com/stiqrhub/testcloud/pkg/gateway"
-	"github.com/stiqrhub/testcloud/pkg/p2p"
-	"github.com/stiqrhub/testcloud/pkg/reticulum"
-	"github.com/stiqrhub/testcloud/pkg/storage"
-	"github.com/stiqrhub/testcloud/pkg/version"
+	"github.com/stiqrhub/stiqrcloud/pkg/audit"
+	"github.com/stiqrhub/stiqrcloud/pkg/escrow"
+	"github.com/stiqrhub/stiqrcloud/pkg/gateway"
+	"github.com/stiqrhub/stiqrcloud/pkg/p2p"
+	"github.com/stiqrhub/stiqrcloud/pkg/reticulum"
+	"github.com/stiqrhub/stiqrcloud/pkg/storage"
+	"github.com/stiqrhub/stiqrcloud/pkg/version"
 )
 
 func main() {
@@ -74,7 +74,7 @@ func main() {
 	}
 
 	// 2. Initialize Reticulum Network Stack (RNS) Identity
-	rnsIdentity, err := reticulum.NewIdentity("testcloud.node")
+	rnsIdentity, err := reticulum.NewIdentity(reticulum.DefaultRNSAspect)
 	if err != nil {
 		log.Fatalf("Failed to initialize Reticulum identity: %v", err)
 	}
@@ -232,7 +232,7 @@ func main() {
 	}
 
 	<-sigChan
-	fmt.Println("\nShutting down TestCloud node gracefully...")
+	fmt.Println("\nShutting down StiQRcloud node gracefully...")
 	rnsManager.Stop()
 	_ = server.Close()
 	if dashServer != nil {
