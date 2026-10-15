@@ -1,5 +1,25 @@
 [
   {
+    "version": "v0.2.0",
+    "release_date": "2026-10-14T20:00:00Z",
+    "title": "Post-Quantum 2-of-3 Threshold & PocketBase Collections UI",
+    "changelog": [
+      "Post-Quantum ML-KEM-768 (FIPS 203) key encapsulation and ML-DSA-65 (FIPS 204) signatures",
+      "Shamir's Secret Sharing (2-of-3 threshold) over GF(2^8) with information-theoretic security",
+      "FastCDC content-defined chunking (Gear rolling hash) preventing cascading boundary shifts",
+      "Signed Merkle chunk manifests with incremental partial-re-encryption on file edits",
+      "Strict node-level write authorization verifying owner & authorized editor ACL signatures",
+      "PocketBase-style dashboard UI with Collections sidebar, dynamic schema fields, and lockbox visualizer",
+      "Offline zero-dependency pure JS SVG QR Code generator for node Reticulum (RNode) destination address",
+      "SDK app-to-node schema handshake (client.ensureCollection) for dynamic collection & field declaration",
+      "Node operator Abuse Blacklist to block abusive identities and Free Whitelist for sat-exempt storage",
+      "Data owner designation of custom storage node RNode addresses or random auto-quorum selection"
+    ],
+    "download_url": "https://github.com/stiqrhub/testcloud/releases/tag/v0.2.0",
+    "checksum_sha": "1993e00d7af11f7079d8ad986b50629a850299cad29970e5b3c641c4011fbd7f",
+    "is_mandatory": false
+  },
+  {
     "version": "v0.1.0",
     "release_date": "2026-10-01T12:00:00Z",
     "title": "Initial Alpha Release - Standalone & Reticulum Compatible",

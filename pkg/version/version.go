@@ -9,7 +9,7 @@ import (
 
 // Current semantic version of the database node.
 const (
-	CurrentVersion = "v0.1.0"
+	CurrentVersion = "v0.2.0"
 	AppName        = "testcloud"
 	UpdateFeedURL  = "https://raw.githubusercontent.com/stiqrhub/testcloud/main/releases/version.json"
 )
@@ -37,6 +37,22 @@ type UpdateStatus struct {
 
 // Built-in initial release history.
 var DefaultHistory = []Release{
+	{
+		Version:     "v0.2.0",
+		ReleaseDate: time.Date(2026, 10, 14, 20, 0, 0, 0, time.UTC),
+		Title:       "Post-Quantum 2-of-3 Threshold & PocketBase Collections UI",
+		Changelog: []string{
+			"Post-Quantum ML-KEM-768 (FIPS 203) key encapsulation and ML-DSA-65 (FIPS 204) signatures",
+			"Shamir's Secret Sharing (2-of-3 threshold) over GF(2^8) with information-theoretic security",
+			"FastCDC content-defined chunking (Gear rolling hash) preventing cascading boundary shifts",
+			"Signed Merkle chunk manifests with incremental partial-re-encryption on file edits",
+			"Strict node-level write authorization verifying owner & authorized editor ACL signatures",
+			"PocketBase-style dashboard UI with Collections sidebar, dynamic schema fields, and lockbox visualizer",
+		},
+		DownloadURL: "https://github.com/stiqrhub/testcloud/releases/tag/v0.2.0",
+		ChecksumSHA: "297dce0408faa819ceac7c9e4e707aa911e1930c8c2173c4503858dc883673cd",
+		IsMandatory: false,
+	},
 	{
 		Version:     "v0.1.0",
 		ReleaseDate: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC),

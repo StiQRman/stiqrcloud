@@ -1,6 +1,9 @@
 import {
+  CollectionField,
+  CollectionInfo,
   CreateRecordOptions,
   CreateRecordResponse,
+  EnsureCollectionOptions,
   NodeConfig,
   NodeHealth,
   Peer,
@@ -419,6 +422,41 @@ export class TestCloudClient {
         return await res.json();
       },
     };
+  }
+
+  /**
+   * Programmatic handshake to declare or merge an app collection and its schema fields.
+   * Tells a new or existing node about the collection and fields the app requires.
+   */
+  async ensureCollection(options: EnsureCollectionOptions): Promise<CollectionInfo> {
+    const endpoint = await this.nodeManager.resolveEndpoint(options.targetNodeUrl);
+    const headers: { [key: string]: string } = {
+      'Content-Type': 'application/json',
+    };
+    if (this.keyPair) {
+      headers['X-User-PubKey'] = this.keyPair.publicKeyHex;
+    }
+    const res = await this._fetch(`${endpoint}/api/collections/ensure`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        name: options.name,
+        fields: options.fields ?? [],
+      }),
+    });
+    await this.checkResponse(res, 'ensureCollection');
+    return (await res.json()) as CollectionInfo;
+  }
+
+  /**
+   * Lists all collections and their schema fields registered on the node.
+   */
+  async listCollections(targetNodeUrl?: string): Promise<CollectionInfo[]> {
+    const endpoint = await this.nodeManager.resolveEndpoint(targetNodeUrl);
+    const res = await this._fetch(`${endpoint}/api/dashboard/collections`);
+    await this.checkResponse(res, 'listCollections');
+    const data = (await res.json()) as { collections: CollectionInfo[] };
+    return data.collections;
   }
 
   private extractBytes(input: any): Uint8Array | undefined {

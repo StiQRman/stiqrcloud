@@ -189,6 +189,36 @@ pkill -9 testcloud
   - **`TestCloudCrypto`** ([`sdk/ts/src/crypto.ts`](sdk/ts/src/crypto.ts)): Client-side AES-256-GCM zero-knowledge encryption using Web Crypto API (`crypto.subtle`) and Ed25519 signing.
   - **Test Suite**: 22 unit and live backend integration tests in [`sdk/ts/test/`](sdk/ts/test).
 
+### 9. Post-Quantum 2-of-3 Threshold & PocketBase Collections UI (`v0.2.0`)
+- **Deployed Version**: `v0.2.0` (ARM64 static binary)
+- **Deployment Target**: Raspberry Pi 4/5 (`192.168.1.50`, `node-operator@192.168.1.50`), service `stiqrcloud.service`
+- **Key Capabilities Live on the Pi**:
+  - **Post-Quantum Cryptography**: ML-KEM-768 (FIPS 203) key encapsulation and ML-DSA-65 (FIPS 204) hybrid signatures.
+  - **Shamir 2-of-3 Threshold**: DEK split into 3 mathematical shares over GF($2^8$), reconstructable from any 2 shares in 0.0017 ms.
+  - **FastCDC Chunking**: Content-defined chunking (Gear rolling hash) preventing cascading boundary shifts during middle-file edits.
+  - **Signed Merkle Chunk Manifests**: Incremental updates re-encrypt only modified chunks while reusing existing chunks.
+  - **Strict Node-Level Authorization**: Edits and deletions verified against owner or `PermEdit` ACL entries with cryptographic signatures.
+  - **PocketBase-Style Dashboard**: Collections sidebar, dynamic schema fields bar, and record inspector with live 2-of-3 lockbox visualization.
+
+### 10. Operator Abuse Blacklist & Free Storage Whitelist
+- **Free Whitelist API**: `GET /api/escrow/whitelist` & `POST /api/escrow/whitelist` to exempt specific user public addresses or RNode hashes from lightning satoshi charges.
+- **Abuse Blacklist API**: `GET /api/escrow/blacklist` & `POST /api/escrow/blacklist` allowing the node operator to ban public keys or identities in case of abuse. Banned identities receive `403 Forbidden` on all write, edit, and delete requests.
+- **Node Dashboard Controls**: Dedicated management cards under the Settings & Audits views with active pill badges and instant unban/remove actions.
+
+### 11. Offline Zero-Dependency RNode QR Code Generator
+- **Dashboard Integration**: Zero-dependency pure JavaScript SVG QR code generator embedded directly inside `pkg/dashboard/dashboard.html`.
+- **TopBar & P2P Mesh Access**: "📱 Node QR" button in topbar and "📱 Show QR Code" in the Reticulum Destination card triggers `modal-rnode-qr`.
+- **Interoperability**: Allows mobile apps, users, and peer operators to scan and designate the node for threshold storage.
+
+### 12. SDK App-to-Node Programmatic Schema Handshake (`client.ensureCollection`)
+- **Handshake Endpoint**: `POST /api/collections/ensure` accepts `{ name, fields }` and merges new custom fields into `collections_schema.json`.
+- **SDK Methods**: `client.ensureCollection({ name, fields })` and `client.listCollections()` allow apps to dynamically initialize their required schema without manual dashboard configuration.
+- **Verified**: 24 unit and live backend integration tests in [`sdk/ts/test/`](sdk/ts/test).
+
+### 13. Data Owner Node Designation & Quorum Routing
+- **New Record Modal**: Allows data owners to enter specific RNode destination hashes or leave blank to automatically select random 2-of-3 quorum peers.
+- **SDK Routing**: Full support in `CreateRecordOptions.storagePeers` for explicit RNode and peer destination arrays.
+
 ---
 
 ## 6. Verification Endpoints & Test Commands
@@ -212,7 +242,8 @@ http://192.168.1.50:8100/dashboard
 # Run Go backend test suite
 go test -count=1 ./...
 
-# Run TypeScript SDK test suite (Builds + runs all 22 tests)
+# Run TypeScript SDK test suite (Builds + runs all 24 tests)
 cd sdk/ts && npm test
 ```
+
 

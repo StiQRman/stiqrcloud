@@ -1,6 +1,6 @@
 # TestCloud
 
-[![Version: v0.1.0](https://img.shields.io/badge/Version-v0.1.0-blue.svg)](releases/version.json)
+[![Version: v0.2.0](https://img.shields.io/badge/Version-v0.2.0-blue.svg)](releases/version.json)
 [![Go: 1.23+](https://img.shields.io/badge/Go-1.23+-00ADD8.svg?style=flat&logo=go)](https://golang.org)
 [![Reticulum Network Stack](https://img.shields.io/badge/Network-Reticulum%20RNS%20Compatible-purple.svg)](https://reticulum.network)
 [![Bitcoin Lightning](https://img.shields.io/badge/Payments-Lightning%20Network-F7931A.svg?logo=bitcoin)](https://lightning.network)

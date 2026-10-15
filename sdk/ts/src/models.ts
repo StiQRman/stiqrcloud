@@ -147,3 +147,24 @@ export interface RecordList {
   limit: number;
   offset: number;
 }
+
+export interface CollectionField {
+  name: string;
+  type: 'text' | 'number' | 'file' | 'json' | 'date' | 'bool' | string;
+  required?: boolean;
+}
+
+export interface CollectionInfo {
+  name: string;
+  record_count: number;
+  fields: CollectionField[];
+  system: boolean;
+  updated_at: string;
+}
+
+export interface EnsureCollectionOptions {
+  name: string;
+  fields?: CollectionField[];
+  targetNodeUrl?: string;
+}
+

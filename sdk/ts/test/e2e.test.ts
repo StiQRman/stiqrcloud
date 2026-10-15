@@ -15,7 +15,9 @@ describe('TypeScript SDK Live End-to-End Integration', () => {
 
   before(async () => {
     testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc_ts_e2e_'));
-    const binPath = path.resolve(process.cwd(), '../../releases/v0.1.0/testcloud-linux-amd64');
+    const binPath = fs.existsSync(path.resolve(process.cwd(), '../../testcloud'))
+      ? path.resolve(process.cwd(), '../../testcloud')
+      : path.resolve(process.cwd(), '../../releases/v0.2.0/testcloud-linux-amd64');
 
     // Spawn real TestCloud backend daemon
     nodeProcess = spawn(binPath, [
@@ -129,5 +131,27 @@ describe('TypeScript SDK Live End-to-End Integration', () => {
 
     const fetched = await col.getOne(item.id);
     assert.equal(fetched.id, item.id);
+  });
+
+  it('should handshake and ensure collection schema and fields on live server', async () => {
+    const info = await client.ensureCollection({
+      name: 'live_app_config',
+      fields: [
+        { name: 'app_id', type: 'text', required: true },
+        { name: 'settings_json', type: 'json', required: false },
+        { name: 'is_active', type: 'bool', required: false },
+      ],
+    });
+
+    assert.equal(info.name, 'live_app_config');
+    const fieldNames = info.fields.map(f => f.name);
+    assert.ok(fieldNames.includes('app_id'));
+    assert.ok(fieldNames.includes('settings_json'));
+    assert.ok(fieldNames.includes('is_active'));
+
+    // Verify collection is returned in listCollections
+    const allCollections = await client.listCollections();
+    const found = allCollections.find(c => c.name === 'live_app_config');
+    assert.ok(found !== undefined);
   });
 });

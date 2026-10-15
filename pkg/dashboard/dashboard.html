@@ -6,357 +6,580 @@
   <title>TestCloud Node Dashboard</title>
   <style>
     :root {
-      --bg: #0d1117;
-      --card-bg: #161b22;
-      --card-hover: #1f242c;
-      --border: #30363d;
-      --accent: #58a6ff;
-      --success: #238636;
-      --warning: #d29922;
-      --purple: #bc8cff;
-      --orange: #f0883e;
-      --text: #c9d1d9;
-      --text-muted: #8b949e;
+      --bg-base: #0f172a;
+      --bg-sidebar: #1e293b;
+      --bg-card: #1e293b;
+      --bg-card-hover: #273549;
+      --bg-input: #0f172a;
+      --border: #334155;
+      --border-focus: #38bdf8;
+      --accent: #38bdf8;
+      --accent-hover: #0284c7;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --purple: #a855f7;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
       --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background-color: var(--bg);
+      background-color: var(--bg-base);
       color: var(--text);
       font-family: var(--font);
       line-height: 1.5;
-      padding: 24px;
-    }
-    .container { max-width: 1200px; margin: 0 auto; }
-    header {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding-bottom: 20px;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Left Sidebar */
+    .sidebar {
+      width: 270px;
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      height: 100vh;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .sidebar-header {
+      padding: 18px 20px;
       border-bottom: 1px solid var(--border);
-      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .brand-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sidebar-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 12px;
+    }
+    .sidebar-section-title {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      padding: 8px 12px 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .btn-icon-add {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--accent);
+      width: 22px;
+      height: 22px;
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+    .btn-icon-add:hover {
+      background: var(--accent);
+      color: var(--bg-base);
+      border-color: var(--accent);
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.88rem;
+      font-weight: 500;
+      cursor: pointer;
+      margin-bottom: 3px;
+      transition: background 0.15s;
+      border: 1px solid transparent;
+      user-select: none;
+    }
+    .nav-item:hover {
+      background: var(--bg-card-hover);
+    }
+    .nav-item.active {
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      border-color: rgba(56, 189, 248, 0.35);
+      font-weight: 600;
+    }
+    .nav-item-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pill-count {
+      font-size: 0.75rem;
+      padding: 1px 7px;
+      border-radius: 10px;
+      background: #334155;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+    .nav-item.active .pill-count {
+      background: rgba(56, 189, 248, 0.25);
+      color: var(--accent);
+    }
+    .sidebar-footer {
+      padding: 14px 16px;
+      border-top: 1px solid var(--border);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Main Content */
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    .topbar {
+      padding: 16px 24px;
+      background: var(--bg-sidebar);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       flex-wrap: wrap;
       gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 5;
     }
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .brand h1 { font-size: 1.5rem; font-weight: 600; color: #fff; }
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .topbar-title {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .topbar-search {
+      position: relative;
+      min-width: 240px;
+    }
+    .topbar-search input {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 7px 12px 7px 32px;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      outline: none;
+    }
+    .topbar-search input:focus {
+      border-color: var(--border-focus);
+    }
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Buttons */
+    .btn {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.88rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .btn:hover { background: #7dd3fc; }
+    .btn-secondary {
+      background: var(--bg-card);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { background: var(--bg-card-hover); }
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+    .btn-danger:hover {
+      background: var(--danger);
+      color: #fff;
+    }
+    .btn-sm {
+      padding: 4px 10px;
+      font-size: 0.8rem;
+    }
+
+    /* Badges */
     .badge {
-      font-size: 0.75rem;
-      padding: 3px 8px;
+      font-size: 0.72rem;
+      padding: 2px 7px;
       border-radius: 12px;
       font-weight: 600;
       text-transform: uppercase;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
-    .badge-primary { background: rgba(88, 166, 255, 0.2); color: var(--accent); border: 1px solid var(--accent); }
-    .badge-rns { background: rgba(188, 140, 255, 0.2); color: var(--purple); border: 1px solid var(--purple); }
-    .badge-success { background: rgba(35, 134, 54, 0.2); color: #3fb950; border: 1px solid #3fb950; }
-    .badge-warning { background: rgba(210, 153, 34, 0.2); color: var(--warning); border: 1px solid var(--warning); }
-    
-    .nav-tabs {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 20px;
+    .badge-primary { background: rgba(56, 189, 248, 0.18); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.4); }
+    .badge-success { background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .badge-warning { background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .badge-danger { background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .badge-purple { background: rgba(168, 85, 247, 0.18); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); }
+
+    /* Schema Fields Chip Bar */
+    .fields-bar {
+      padding: 12px 24px;
+      background: rgba(30, 41, 59, 0.5);
       border-bottom: 1px solid var(--border);
-      padding-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow-x: auto;
     }
-    .nav-btn {
-      background: none;
-      border: none;
+    .fields-bar-title {
+      font-size: 0.78rem;
+      font-weight: 700;
       color: var(--text-muted);
-      padding: 8px 16px;
-      cursor: pointer;
-      font-size: 0.95rem;
-      font-weight: 500;
-      border-radius: 6px;
-      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      white-space: nowrap;
+      margin-right: 4px;
     }
-    .nav-btn.active {
-      color: #fff;
-      background: var(--card-bg);
+    .field-chip {
+      background: var(--bg-card);
       border: 1px solid var(--border);
+      padding: 3px 10px;
+      border-radius: 14px;
+      font-size: 0.8rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .field-chip-name { font-weight: 600; color: #fff; }
+    .field-chip-type { font-size: 0.7rem; color: var(--text-muted); font-family: monospace; }
+
+    /* Content Area */
+    .view-container {
+      padding: 24px;
     }
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 16px;
       margin-bottom: 24px;
     }
     .card {
-      background: var(--card-bg);
+      background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 18px;
     }
     .card-title {
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
     .card-value {
       font-size: 1.6rem;
       font-weight: 700;
       color: #fff;
     }
-    .card-sub { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; }
+    .card-sub { font-size: 0.82rem; color: var(--text-muted); margin-top: 4px; }
+
+    /* Tables */
     .table-container {
-      background: var(--card-bg);
+      background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 8px;
       overflow-x: auto;
-      margin-bottom: 24px;
     }
-    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.88rem; }
     th {
       padding: 12px 16px;
-      background: #21262d;
+      background: #182234;
       color: var(--text-muted);
       font-weight: 600;
       border-bottom: 1px solid var(--border);
+      white-space: nowrap;
     }
-    td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    td { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
     tr:last-child td { border-bottom: none; }
-    .mono { font-family: monospace; font-size: 0.85rem; }
-    
-    /* Policy & Config Cards */
+    tr:hover td { background: rgba(56, 189, 248, 0.02); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.82rem; }
+
+    /* Policy & Config Box */
     .policy-box {
-      background: var(--card-bg);
+      background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 20px;
       margin-bottom: 20px;
     }
-    .policy-box h3 {
-      font-size: 1.1rem;
-      color: #fff;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .policy-box p {
-      font-size: 0.9rem;
-      color: var(--text-muted);
-      margin-bottom: 16px;
-    }
-    .form-row {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-    }
-    .form-label {
-      font-size: 0.9rem;
-      font-weight: 600;
-      color: var(--text);
-      min-width: 140px;
-    }
+    .policy-box h3 { font-size: 1.1rem; color: #fff; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .policy-box p { font-size: 0.88rem; color: var(--text-muted); margin-bottom: 16px; }
+    .form-row { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+    .form-label { font-size: 0.88rem; font-weight: 600; color: var(--text); min-width: 140px; }
     .form-input {
-      background: #0d1117;
+      background: var(--bg-input);
       border: 1px solid var(--border);
       color: #fff;
       padding: 8px 12px;
       border-radius: 6px;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       font-family: inherit;
       outline: none;
     }
-    .form-input:focus { border-color: var(--accent); }
-    .btn {
-      background: var(--accent);
-      color: #0d1117;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      cursor: pointer;
-      transition: opacity 0.2s;
-    }
-    .btn:hover { opacity: 0.9; }
-    .btn-secondary {
-      background: #21262d;
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-    .btn-secondary:hover { background: #30363d; }
-    
-    /* Toggle switch */
-    .switch-wrap {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      cursor: pointer;
-      user-select: none;
-    }
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 44px;
-      height: 24px;
-    }
+    .form-input:focus { border-color: var(--border-focus); }
+
+    /* Switch */
+    .switch-wrap { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+    .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #30363d;
-      transition: .3s;
-      border-radius: 24px;
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #334155; transition: .3s; border-radius: 24px;
     }
     .slider:before {
-      position: absolute;
-      content: "";
-      height: 18px;
-      width: 18px;
-      left: 3px;
-      bottom: 3px;
-      background-color: white;
-      transition: .3s;
-      border-radius: 50%;
+      position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px;
+      background-color: white; transition: .3s; border-radius: 50%;
     }
-    input:checked + .slider { background-color: #3fb950; }
+    input:checked + .slider { background-color: #10b981; }
     input:checked + .slider:before { transform: translateX(20px); }
-    
-    /* Whitelist pills */
-    .pill-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .whitelist-pill {
-      background: #21262d;
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 4px 12px;
-      font-size: 0.85rem;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .pill-remove {
-      background: none;
-      border: none;
-      color: #f85149;
-      font-weight: 700;
-      cursor: pointer;
-      font-size: 1rem;
-      line-height: 1;
-    }
-    .pill-remove:hover { color: #ff7b72; }
 
-    /* Capacity Progress Bar */
-    .capacity-bar {
-      height: 14px;
-      background: #21262d;
-      border-radius: 7px;
-      overflow: hidden;
-      display: flex;
-      margin: 12px 0;
-      border: 1px solid var(--border);
+    /* Whitelist pills */
+    .pill-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .whitelist-pill {
+      background: #0f172a; border: 1px solid var(--border); border-radius: 20px;
+      padding: 4px 12px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 8px;
     }
-    .cap-active { background: #3fb950; }
-    .cap-grace { background: #d29922; }
-    .cap-free { background: #30363d; }
+    .blacklist-pill {
+      background: #450a0a; border: 1px solid #7f1d1d; border-radius: 20px;
+      padding: 4px 12px; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 8px; color: #fca5a5;
+    }
+    .pill-remove { background: none; border: none; color: #ef4444; font-weight: 700; cursor: pointer; }
+
+    /* Capacity bar */
+    .capacity-bar {
+      height: 14px; background: #0f172a; border-radius: 7px; overflow: hidden;
+      display: flex; margin: 12px 0; border: 1px solid var(--border);
+    }
+    .cap-active { background: #10b981; }
+    .cap-grace { background: #f59e0b; }
 
     /* Settings Update Card */
     .update-card {
       border: 2px solid var(--accent);
-      background: linear-gradient(180deg, #161b22 0%, #1f242c 100%);
-      padding: 24px;
-      border-radius: 10px;
-      margin-bottom: 24px;
+      background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+      padding: 24px; border-radius: 10px; margin-bottom: 24px;
     }
-    .update-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-    .changelog-list {
-      margin-top: 12px;
-      padding-left: 20px;
-      font-size: 0.9rem;
-      color: var(--text);
-    }
+    .update-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
+    .changelog-list { margin-top: 12px; padding-left: 20px; font-size: 0.88rem; color: var(--text); }
     .changelog-list li { margin-bottom: 6px; }
+
+    /* Modal / Drawer */
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(2px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    .modal-box {
+      background: #1e293b; border: 1px solid var(--border); border-radius: 10px;
+      width: 90%; max-width: 680px; max-height: 90vh; overflow-y: auto;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .modal-header {
+      padding: 18px 24px; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .modal-header h3 { font-size: 1.15rem; color: #fff; }
+    .modal-body { padding: 24px; }
+    .modal-footer {
+      padding: 16px 24px; border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; gap: 10px;
+    }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+    .form-group input, .form-group textarea, .form-group select {
+      width: 100%; background: var(--bg-input); border: 1px solid var(--border);
+      color: #fff; padding: 9px 12px; border-radius: 6px; font-size: 0.88rem; font-family: inherit;
+    }
+    .form-group textarea { min-height: 90px; resize: vertical; }
+
+    /* Tabs inside Inspector Modal */
+    .inspector-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+    .inspector-tab-btn {
+      background: none; border: none; color: var(--text-muted); padding: 8px 14px;
+      cursor: pointer; font-size: 0.88rem; font-weight: 600; border-bottom: 2px solid transparent;
+    }
+    .inspector-tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div class="brand">
-        <h1>TestCloud DB</h1>
-        <span class="badge badge-primary" id="version-tag">v0.1.0</span>
-        <span class="badge badge-rns" id="rns-badge">RNS: Connecting</span>
-        <span id="node-name-badge" class="badge" style="background:#21262d;color:var(--accent);font-weight:600;">Node: loading...</span>
+
+  <!-- Left Sidebar (PocketBase Style) -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="brand-title">
+        <span style="font-size:1.3rem;">⚡</span>
+        <span>TestCloud DB</span>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span id="node-ip-badge" class="badge mono" style="display:none;background:rgba(56,189,248,0.12);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);">WAN IP: -</span>
-        <span class="badge badge-success" id="mode-badge">Database-First</span>
+      <span class="badge badge-primary" id="version-tag">v0.1.0</span>
+    </div>
+
+    <div class="sidebar-scroll">
+      <!-- Collections Section -->
+      <div class="sidebar-section-title">
+        <span>Collections</span>
+        <button class="btn-icon-add" title="Create Collection" onclick="openNewCollectionModal()">+</button>
+      </div>
+      <div id="collections-list">
+        <!-- Injected via JavaScript -->
+        <div class="nav-item active" onclick="selectCollection('notes')">
+          <span class="nav-item-name">📝 notes</span>
+          <span class="pill-count">0</span>
+        </div>
+      </div>
+
+      <!-- Node & Mesh Section -->
+      <div class="sidebar-section-title" style="margin-top:20px;">
+        <span>System & Mesh</span>
+      </div>
+      <div class="nav-item" id="nav-item-mesh" onclick="switchSystemTab('mesh')">
+        <span class="nav-item-name">🌐 P2P Mesh & Reticulum</span>
+        <span class="pill-count" id="sidebar-peers-count">0</span>
+      </div>
+      <div class="nav-item" id="nav-item-audits" onclick="switchSystemTab('audits')">
+        <span class="nav-item-name">⚡ Escrow & Audits</span>
+        <span class="pill-count" id="sidebar-sats-count">0 S</span>
+      </div>
+      <div class="nav-item" id="nav-item-settings" onclick="switchSystemTab('settings')">
+        <span class="nav-item-name">⚙️ Settings & Updates</span>
+        <span class="badge badge-success" id="sidebar-up-to-date" style="font-size:0.65rem;">v0.1.0</span>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <span id="node-name-badge">Node: loading...</span>
+      <span class="badge badge-success" id="mode-badge">Local</span>
+    </div>
+  </aside>
+
+  <!-- Main Panel -->
+  <main class="main-content">
+    
+    <!-- Topbar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-title">
+          <span id="topbar-col-icon">📁</span>
+          <span id="topbar-col-name">notes</span>
+          <span class="pill-count" id="topbar-col-records-count">0 records</span>
+        </div>
+      </div>
+
+      <div class="topbar-search" id="search-box-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="record-search-input" placeholder="Search records..." oninput="filterRecords()">
+      </div>
+
+      <div class="topbar-actions">
+        <button class="btn btn-secondary btn-sm" id="btn-node-qr" onclick="openNodeQRModal()">📱 Node QR</button>
+        <button class="btn btn-secondary btn-sm" id="btn-toggle-fields" onclick="toggleFieldsBar()">Fields</button>
+        <button class="btn btn-secondary btn-sm" onclick="refreshCurrentView()">↻ Refresh</button>
+        <button class="btn btn-sm" id="btn-new-record" onclick="openNewRecordModal()">+ New Record</button>
       </div>
     </header>
 
-    <div class="nav-tabs">
-      <button class="nav-btn active" onclick="switchTab('explorer')">Database & Explorer</button>
-      <button class="nav-btn" onclick="switchTab('mesh')">P2P & Reticulum Mesh</button>
-      <button class="nav-btn" onclick="switchTab('audits')">Auditing & Lightning Escrow</button>
-      <button class="nav-btn" onclick="switchTab('settings')">Settings & Updates</button>
+    <!-- Schema Fields Bar (PocketBase Concept: In collections there are fields) -->
+    <div class="fields-bar" id="schema-fields-bar">
+      <span class="fields-bar-title">Fields:</span>
+      <div id="fields-chips-container" style="display:flex;gap:8px;">
+        <!-- Injected dynamically -->
+      </div>
     </div>
 
-    <!-- Explorer View -->
-    <div id="tab-explorer">
-      <div class="grid">
-        <div class="card">
-          <div class="card-title">Database Records</div>
-          <div class="card-value" id="stat-records">0</div>
-          <div class="card-sub">Invariant persistent primary keys</div>
-        </div>
-        <div class="card">
-          <div class="card-title">Storage Disk Used</div>
-          <div class="card-value" id="stat-storage">0 KB</div>
-          <div class="card-sub">Content-addressed chunk files</div>
-        </div>
-        <div class="card">
-          <div class="card-title">Active Mesh Mode</div>
-          <div class="card-value" id="stat-mode" style="font-size:1.2rem;">Standalone</div>
-          <div class="card-sub">Offline CRUD capable</div>
-        </div>
-      </div>
-
+    <!-- Collection Records View -->
+    <section class="view-container" id="view-records">
       <div class="table-container">
         <table>
           <thead>
             <tr>
-              <th>Invariant Data ID</th>
-              <th>Collection</th>
+              <th>Data ID (Invariant)</th>
               <th>Version</th>
-              <th>Owner Public Address</th>
-              <th>Storage Quorum</th>
+              <th>Text / Payload</th>
+              <th>Attachment</th>
+              <th>Post-Quantum Lockbox (2-of-3)</th>
               <th>Permissions (ACL)</th>
-              <th>Merkle Root</th>
               <th>Updated At</th>
+              <th style="text-align:right;">Actions</th>
             </tr>
           </thead>
           <tbody id="records-table-body">
-            <tr><td colspan="8" style="text-align:center;color:var(--text-muted);">No records found. Create records via REST API, SDK, or Bluetooth.</td></tr>
+            <tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:30px;">Loading collection records...</td></tr>
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
 
     <!-- Mesh View -->
-    <div id="tab-mesh" style="display:none;">
+    <section class="view-container" id="view-mesh" style="display:none;">
       <div class="grid">
         <div class="card">
           <div class="card-title">Reticulum Destination</div>
-          <div class="card-value mono" id="rns-dest" style="font-size:1.1rem;word-break:break-all;">-</div>
+          <div class="card-value mono" id="rns-dest" style="font-size:1.05rem;word-break:break-all;">-</div>
           <div class="card-sub" id="rns-sub">16-byte cryptographic RNS address</div>
+          <div style="margin-top:10px;">
+            <button class="btn btn-secondary btn-sm" onclick="openNodeQRModal()">📱 Show QR Code</button>
+          </div>
         </div>
         <div class="card">
           <div class="card-title">Mesh Peers (75/25 Weighted)</div>
@@ -364,9 +587,9 @@
           <div class="card-sub">Auditors & Storage Nodes</div>
         </div>
         <div class="card">
-          <div class="card-title">Peer Latency</div>
-          <div class="card-value" id="stat-latency">- ms</div>
-          <div class="card-sub">Network health average</div>
+          <div class="card-title">Storage Disk Used</div>
+          <div class="card-value" id="stat-storage">0 KB</div>
+          <div class="card-sub">Content-addressed FastCDC chunk files</div>
         </div>
       </div>
 
@@ -390,10 +613,10 @@
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
 
-    <!-- Audits & Lightning Escrow View -->
-    <div id="tab-audits" style="display:none;">
+    <!-- Auditing & Escrow View -->
+    <section class="view-container" id="view-audits" style="display:none;">
       <div class="grid">
         <div class="card">
           <div class="card-title">Contracts Handled</div>
@@ -412,7 +635,7 @@
         </div>
       </div>
 
-      <!-- Storage Monetization & Free Controls -->
+      <!-- Storage Monetization -->
       <div class="policy-box">
         <h3>⚡ Storage Monetization & Free Tiers</h3>
         <p>Control whether your node charges clients in Lightning satoshis or offers free decentralized hosting.</p>
@@ -435,68 +658,71 @@
           <button class="btn btn-secondary" onclick="updatePrice()">Save Price</button>
         </div>
 
-        <div style="margin-top:12px;" id="pricing-status-callout">
+        <div style="margin-top:12px;">
           <span class="badge badge-warning" id="pricing-status-badge">⚡ Paid Storage Active</span>
         </div>
       </div>
 
-      <!-- Free Whitelist Management -->
+      <!-- Free Whitelist -->
       <div class="policy-box">
         <h3>🏷️ Free Storage Whitelist</h3>
-        <p>Public addresses listed here receive <strong>100% free storage</strong> on this node, even when paid mode is turned on. Add your apps, friends, emergency mesh keys, or Reticulum identities.</p>
+        <p>Public addresses listed here receive <strong>100% free storage</strong> on this node, even when paid mode is turned on.</p>
 
         <div class="form-row">
           <input type="text" id="whitelist-address-input" class="form-input mono" placeholder="Enter user_pub_address or Reticulum hash..." style="flex:1;min-width:280px;">
           <button class="btn" onclick="addWhitelistAddress()">+ Add to Whitelist</button>
         </div>
 
-        <div class="pill-list" id="whitelist-pills">
-          <span style="color:var(--text-muted);font-size:0.85rem;" id="whitelist-empty-msg">No addresses whitelisted yet.</span>
-        </div>
+        <div class="pill-list" id="whitelist-pills"></div>
       </div>
 
-      <!-- Retention & Eviction Policy -->
+      <!-- Abuse Blacklist -->
       <div class="policy-box">
-        <h3>📦 Grace Retention & Eviction Policy</h3>
-        <p style="margin-bottom:8px;">
-          <strong>Zero Immediate Deletions Guarantee:</strong> When a storage contract expires or a client stops paying, this node will <strong>never automatically delete the data</strong>. It remains preserved and served in grace retention. If node storage reaches maximum quota, the <strong>oldest expired contracts are evicted first</strong> to make room for incoming contracts.
-        </p>
+        <h3>🚫 Abuse Blacklist (Ban Identities)</h3>
+        <p>Banned public keys or Reticulum hashes cannot store new records, edit existing records, or consume bandwidth on this node.</p>
 
-        <!-- Capacity Visual Breakdown -->
-        <div style="display:flex;justify-content:space-between;font-size:0.85rem;color:var(--text-muted);margin-top:16px;">
-          <span>🟢 Active Paid: <strong id="bar-active-text" style="color:#fff;">0 MB</strong></span>
-          <span>🟡 Grace Retention (Expired/Unpaid): <strong id="bar-grace-text" style="color:var(--warning);">0 MB</strong> (<span id="grace-count-text">0</span> preserved)</span>
-          <span>⚪ Total Quota: <strong id="bar-total-text" style="color:#fff;">50 GB</strong></span>
+        <div class="form-row">
+          <input type="text" id="blacklist-address-input" class="form-input mono" placeholder="Enter abusive user_pub_address or Reticulum hash to ban..." style="flex:1;min-width:280px;">
+          <button class="btn" style="background:#dc2626;border-color:#b91c1c;" onclick="addBlacklistAddress()">🚫 Ban Address</button>
         </div>
+
+        <div class="pill-list" id="blacklist-pills"></div>
+      </div>
+
+      <!-- Capacity & Retention -->
+      <div class="policy-box">
+        <h3>💾 Local Storage Retention & Quotas</h3>
+        <p>Control total disk allocation. When capacity exceeds quota, expired contracts are evicted from oldest to newest.</p>
+
         <div class="capacity-bar">
           <div class="cap-active" id="cap-active-bar" style="width: 1%;"></div>
           <div class="cap-grace" id="cap-grace-bar" style="width: 0%;"></div>
-          <div class="cap-free" style="flex:1;"></div>
         </div>
 
-        <div class="form-row" style="margin-top:16px;">
-          <label class="form-label" for="quota-input-gb">Max Storage Quota:</label>
-          <input type="number" id="quota-input-gb" class="form-input" style="width:100px;" min="1" value="50">
-          <span style="color:var(--text-muted);font-size:0.9rem;">GB</span>
+        <div style="display:flex;justify-content:space-between;font-size:0.85rem;color:var(--text-muted);margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+          <span>🟢 Active: <strong style="color:#fff;" id="bar-active-text">0 KB</strong></span>
+          <span>🟡 Grace: <strong style="color:#fff;" id="bar-grace-text">0 KB</strong> (<span id="grace-count-text">0</span> records)</span>
+          <span>Total Cap: <strong style="color:#fff;" id="bar-total-text">50.0 GB</strong></span>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label">Storage Quota:</label>
+          <input type="number" id="quota-input-gb" class="form-input" style="width:100px;" min="1" max="10000" value="50">
+          <span style="color:var(--text-muted);font-size:0.88rem;">GB</span>
           <button class="btn btn-secondary" onclick="updateQuota()">Save Quota</button>
         </div>
       </div>
 
-      <!-- Recent Audits Table -->
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;margin-top:20px;">
-        <h3 style="font-size:1.1rem;color:#fff;">Recent Merkle Audits & Verification Challenges</h3>
-        <button class="btn btn-secondary" onclick="triggerAudit()">⚡ Run Audit Challenge Now</button>
-      </div>
       <div class="table-container">
         <table>
           <thead>
             <tr>
               <th>Challenge ID</th>
               <th>Storage Node</th>
-              <th>Result</th>
-              <th>Verification Time</th>
-              <th>Response Latency</th>
-              <th>Integrity Notes</th>
+              <th>Status</th>
+              <th>Timestamp</th>
+              <th>Latency</th>
+              <th>Notes</th>
             </tr>
           </thead>
           <tbody id="audits-table-body">
@@ -504,22 +730,22 @@
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
 
-    <!-- Settings & Update Card View -->
-    <div id="tab-settings" style="display:none;">
+    <!-- Settings & Updates View -->
+    <section class="view-container" id="view-settings" style="display:none;">
       <div class="update-card">
         <div class="update-header">
           <div>
             <h2 style="color:#fff;font-size:1.3rem;">Software Updates & Release Channel</h2>
-            <p style="color:var(--text-muted);font-size:0.9rem;margin-top:4px;">
+            <p style="color:var(--text-muted);font-size:0.88rem;margin-top:4px;">
               Integrated version manager adhering to Semantic Versioning (vMAJOR.MINOR.PATCH)
             </p>
           </div>
           <button class="btn" onclick="checkUpdates()">Check for Updates</button>
         </div>
 
-        <div style="background:#0d1117;padding:16px;border-radius:6px;border:1px solid var(--border);margin-top:16px;">
+        <div style="background:#0f172a;padding:16px;border-radius:6px;border:1px solid var(--border);margin-top:16px;">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
             <div>
               <span style="color:var(--text-muted);font-size:0.85rem;">INSTALLED VERSION:</span>
@@ -535,30 +761,748 @@
           </div>
 
           <div style="margin-top:16px;">
-            <h3 style="font-size:1rem;color:#fff;margin-bottom:8px;">Current Release Highlights</h3>
+            <h3 style="font-size:0.95rem;color:#fff;margin-bottom:8px;">Active Cryptographic & Storage Architecture</h3>
             <ul class="changelog-list" id="settings-changelog">
-              <li>Standalone-first local SQLite database with chunk storage</li>
-              <li>Reticulum Network Stack (RNS) packet and destination compatibility</li>
-              <li>Storage monetization controls: Free for everyone toggle & sats/GB/month pricing</li>
-              <li>Free Whitelist: Permanent fee exemption for designated client public keys</li>
-              <li>Grace retention policy: Expired contracts kept safe until storage quota full</li>
-              <li>Distributed 3-Auditor + 3-Storage quorum with Merkle audits</li>
-              <li>Pluggable Bitcoin Lightning Network micropayments & Mock LN Sandbox</li>
+              <li><strong>Post-Quantum KEM (FIPS 203)</strong>: ML-KEM-768 key encapsulation for threshold lockboxes (~0.07 ms)</li>
+              <li><strong>Threshold Secret Sharing</strong>: 2-of-3 Shamir DEK split over GF(2^8) (~0.0017 ms)</li>
+              <li><strong>Content-Defined Chunking (FastCDC)</strong>: Gear rolling hash with normalized masks (no middle edit domino shifts)</li>
+              <li><strong>Hybrid Signatures (FIPS 204)</strong>: ML-DSA-65 post-quantum + Ed25519 identity verification</li>
+              <li><strong>Strict Node Authorization</strong>: Mutation endpoints verify owner or editor ACL signature</li>
+              <li><strong>PocketBase-Compatible Schema</strong>: Dynamic collections, schema fields, and REST endpoints</li>
+              <li><strong>Reticulum RNS Mesh</strong>: Cryptographic destination hashes & multi-hop packet routing</li>
+              <li><strong>Bitcoin Lightning Escrow</strong>: Automated proof-of-storage Merkle audits & rent settlement</li>
             </ul>
           </div>
         </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal: Create New Record -->
+  <div class="modal-overlay" id="modal-new-record" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Create New Record</h3>
+        <button class="pill-remove" onclick="closeModal('modal-new-record')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Target Collection</label>
+          <select id="new-record-collection" class="form-input"></select>
+        </div>
+        <div class="form-group">
+          <label>Payload Text / Content (string / JSON)</label>
+          <textarea id="new-record-text" placeholder="Enter confidential document, notes, or JSON string..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>Attach File (FastCDC Content-Defined Chunking)</label>
+          <input type="file" id="new-record-file">
+        </div>
+        <div class="form-group">
+          <label>Owner Public Key (Ed25519 or ML-DSA-65 hex)</label>
+          <input type="text" id="new-record-owner" class="mono" placeholder="Optional: Leave blank for anonymous / local owner">
+        </div>
+        <div class="form-group">
+          <label>Replication Policy</label>
+          <select id="new-record-policy" class="form-input">
+            <option value="replicated_2" selected>Auto-Quorum 2-of-3 (Random/automatic peer selection)</option>
+            <option value="custom">Designate Specific Storage Nodes (RNode/Peer addresses)</option>
+            <option value="local">Local Only (Kept strictly on this hardware)</option>
+            <option value="distributed">Full Mesh Quorum (All healthy storage peers)</option>
+          </select>
+        </div>
+        <div class="form-group" id="group-custom-nodes">
+          <label>Storage Node Addresses (RNode Destination Hashes / Peer IDs)</label>
+          <input type="text" id="new-record-nodes" class="mono" placeholder="Comma-separated RNode addresses (e.g. 7c9a4b...), or leave blank for random auto-quorum">
+          <span style="font-size:0.75rem;color:var(--text-muted);display:block;margin-top:4px;">Enter specific storage node RNode addresses or leave blank to let TestCloud randomly pick quorum peers.</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-new-record')">Cancel</button>
+        <button class="btn" onclick="submitCreateRecord()">Create Record</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Node Reticulum QR Code -->
+  <div class="modal-overlay" id="modal-rnode-qr" style="display:none;">
+    <div class="modal-box" style="max-width:440px;text-align:center;">
+      <div class="modal-header">
+        <h3>📱 Node Reticulum Address</h3>
+        <button class="pill-remove" onclick="closeModal('modal-rnode-qr')">&times;</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;align-items:center;">
+        <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:16px;">
+          Scan with a mobile app or peer to designate this node for threshold storage and encrypted envelope routing.
+        </p>
+        <div id="rnode-qr-container" style="background:#ffffff;padding:16px;border-radius:12px;display:inline-block;box-shadow:0 4px 20px rgba(0,0,0,0.5);">
+          <!-- Injected SVG QR -->
+        </div>
+        <div style="margin-top:18px;width:100%;">
+          <label style="font-size:0.78rem;color:var(--text-muted);display:block;margin-bottom:4px;text-align:left;">RNode Destination Address</label>
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="qr-modal-rnode-input" readonly class="form-input mono" style="font-size:0.85rem;" value="">
+            <button class="btn btn-secondary btn-sm" id="btn-copy-rnode" onclick="copyRNodeAddress()">Copy</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content:center;">
+        <button class="btn btn-secondary" onclick="closeModal('modal-rnode-qr')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Create New Collection -->
+  <div class="modal-overlay" id="modal-new-collection" style="display:none;">
+    <div class="modal-box" style="max-width:440px;">
+      <div class="modal-header">
+        <h3>Create New Collection</h3>
+        <button class="pill-remove" onclick="closeModal('modal-new-collection')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Collection Name</label>
+          <input type="text" id="new-collection-name" placeholder="e.g. documents, invoices, sensor_logs">
+        </div>
+        <p style="font-size:0.82rem;color:var(--text-muted);">
+          Collections contain fields for invariant Data IDs, version tracking, FastCDC chunk manifests, post-quantum lockboxes, and ACLs.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-new-collection')">Cancel</button>
+        <button class="btn" onclick="submitCreateCollection()">Create Collection</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Record Inspector & Lockbox Drawer -->
+  <div class="modal-overlay" id="modal-record-detail" style="display:none;">
+    <div class="modal-box" style="max-width:760px;">
+      <div class="modal-header">
+        <div>
+          <h3 id="detail-modal-title">Record Inspector</h3>
+          <span class="mono" id="detail-data-id" style="font-size:0.8rem;color:var(--accent);"></span>
+        </div>
+        <button class="pill-remove" onclick="closeModal('modal-record-detail')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="inspector-tabs">
+          <button class="inspector-tab-btn active" onclick="switchInspectorTab('data')">Fields & Data</button>
+          <button class="inspector-tab-btn" onclick="switchInspectorTab('acl')">Collaborators & ACL</button>
+          <button class="inspector-tab-btn" onclick="switchInspectorTab('lockbox')">2-of-3 PQ Lockbox</button>
+          <button class="inspector-tab-btn" onclick="switchInspectorTab('manifest')">FastCDC Chunks</button>
+        </div>
+
+        <!-- Inspector Tab: Data -->
+        <div id="inspector-tab-data">
+          <div class="form-group">
+            <label>Version</label>
+            <input type="text" id="detail-version" readonly class="mono">
+          </div>
+          <div class="form-group">
+            <label>Text Content</label>
+            <textarea id="detail-text"></textarea>
+          </div>
+          <div class="form-group" id="detail-file-row">
+            <label>Attached File</label>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span id="detail-filename" class="mono" style="color:#fff;"></span>
+              <a id="detail-file-download" class="btn btn-secondary btn-sm" target="_blank">Download Chunk</a>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Merkle Proof Root</label>
+            <input type="text" id="detail-merkle" readonly class="mono">
+          </div>
+          <div style="display:flex;justify-content:flex-end;">
+            <button class="btn" onclick="submitUpdateRecordText()">Save Edits (Signed)</button>
+          </div>
+        </div>
+
+        <!-- Inspector Tab: Collaborators (ACL) -->
+        <div id="inspector-tab-acl" style="display:none;">
+          <h4 style="font-size:0.95rem;color:#fff;margin-bottom:8px;">Authorized Collaborator Keys</h4>
+          <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:16px;">
+            Grant specific friends permission to view or edit this file without re-encrypting the bulk chunks.
+          </p>
+
+          <div style="background:#0f172a;padding:14px;border-radius:6px;border:1px solid var(--border);margin-bottom:16px;">
+            <div class="form-group">
+              <label>Friend Signing Public Key (Ed25519 or ML-DSA-65 hex)</label>
+              <input type="text" id="new-collab-key" class="mono" placeholder="Enter friend's public key...">
+            </div>
+            <div class="form-row" style="margin-bottom:0;">
+              <label class="form-label">Permission:</label>
+              <select id="new-collab-perm" class="form-input" style="width:140px;">
+                <option value="edit">Edit (Can update)</option>
+                <option value="view">View Only</option>
+              </select>
+              <button class="btn btn-sm" onclick="submitAddCollaborator()">+ Add Collaborator</button>
+            </div>
+          </div>
+
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Public Key</th>
+                  <th>Permission</th>
+                  <th>Added At</th>
+                  <th style="text-align:right;">Revoke</th>
+                </tr>
+              </thead>
+              <tbody id="detail-acl-tbody">
+                <tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Owner only (No external collaborators)</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Inspector Tab: Post-Quantum Lockbox (2-of-3 Quorum) -->
+        <div id="inspector-tab-lockbox" style="display:none;">
+          <h4 style="font-size:0.95rem;color:#fff;margin-bottom:8px;">2-of-3 Threshold Post-Quantum Key Envelopes</h4>
+          <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:16px;">
+            The 256-bit symmetric DEK is split into 3 Shamir shares. Each storage node holds only an ML-KEM-768 encrypted share packet (~1.1 KB).
+          </p>
+
+          <div class="grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom:16px;">
+            <div class="card" style="padding:14px;text-align:center;">
+              <span class="badge badge-primary">Node 1</span>
+              <div style="font-size:0.85rem;font-weight:bold;margin:8px 0;color:#fff;">Share S₁</div>
+              <div class="card-sub mono" style="font-size:0.75rem;">E_Friend(S₁)</div>
+              <span class="badge badge-success" style="margin-top:8px;" id="lockbox-node-1-status">Present</span>
+            </div>
+            <div class="card" style="padding:14px;text-align:center;">
+              <span class="badge badge-primary">Node 2</span>
+              <div style="font-size:0.85rem;font-weight:bold;margin:8px 0;color:#fff;">Share S₂</div>
+              <div class="card-sub mono" style="font-size:0.75rem;">E_Friend(S₂)</div>
+              <span class="badge badge-success" style="margin-top:8px;" id="lockbox-node-2-status">Present</span>
+            </div>
+            <div class="card" style="padding:14px;text-align:center;">
+              <span class="badge badge-primary">Node 3</span>
+              <div style="font-size:0.85rem;font-weight:bold;margin:8px 0;color:#fff;">Share S₃</div>
+              <div class="card-sub mono" style="font-size:0.75rem;">E_Friend(S₃)</div>
+              <span class="badge badge-success" style="margin-top:8px;" id="lockbox-node-3-status">Present</span>
+            </div>
+          </div>
+
+          <div style="background:#0f172a;padding:14px;border-radius:6px;border:1px solid var(--border);">
+            <h5 style="color:#fff;font-size:0.85rem;margin-bottom:6px;">Instant Threshold Revocation</h5>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px;">
+              Purging a friend's share slot from 2 nodes leaves fewer than 2 shares available, making it mathematically impossible to recover the DEK.
+            </p>
+            <div class="form-row" style="margin-bottom:0;">
+              <input type="text" id="purge-friend-id" class="form-input mono" placeholder="Enter friend identifier to purge..." style="flex:1;">
+              <button class="btn btn-danger btn-sm" onclick="submitPurgeLockbox()">Purge Share Slot</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Inspector Tab: FastCDC Chunks -->
+        <div id="inspector-tab-manifest" style="display:none;">
+          <h4 style="font-size:0.95rem;color:#fff;margin-bottom:8px;">FastCDC Slices & Content Boundaries</h4>
+          <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:16px;">
+            Gear rolling hash slices files into content-defined boundaries. Mid-file edits never cascade past unaffected chunks.
+          </p>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Plaintext Hash</th>
+                  <th>Encrypted Hash</th>
+                  <th>Size</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="detail-chunks-tbody">
+                <tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No chunk manifest entries for text-only record.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-record-detail')">Close</button>
       </div>
     </div>
   </div>
 
   <script>
-    let currentPolicy = { free_for_all: true, price_per_gb_month: 100, free_whitelist: [] };
+    let currentRnsDest = '';
+    let currentCollection = 'notes';
+    let collectionsList = [];
+    let currentRecords = [];
+    let activeRecord = null;
+    let currentPolicy = { free_for_all: true, price_per_gb_month: 100, free_whitelist: [], blacklist: [] };
 
-    function switchTab(tab) {
-      document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = 'none');
-      document.getElementById('tab-' + tab).style.display = 'block';
+    // Standard schema fields
+    const defaultFields = [
+      { name: 'data_id', type: 'text', required: true },
+      { name: 'version', type: 'number', required: true },
+      { name: 'text', type: 'text', required: false },
+      { name: 'file_name', type: 'file', required: false },
+      { name: 'acl', type: 'json', required: false },
+      { name: 'lockboxes', type: 'pq-shares', required: false },
+      { name: 'merkle_root', type: 'hash', required: false },
+      { name: 'updated_at', type: 'date', required: true }
+    ];
+
+    async function loadCollections() {
+      try {
+        const res = await fetch('/api/dashboard/collections');
+        const data = await res.json();
+        collectionsList = data.collections || [];
+
+        const container = document.getElementById('collections-list');
+        const select = document.getElementById('new-record-collection');
+
+        if (collectionsList.length === 0) {
+          collectionsList = [
+            { name: 'notes', record_count: 0, fields: defaultFields },
+            { name: 'files', record_count: 0, fields: defaultFields },
+            { name: 'default', record_count: 0, fields: defaultFields }
+          ];
+        }
+
+        container.innerHTML = collectionsList.map(c => {
+          const isActive = c.name === currentCollection;
+          const icon = c.name.includes('file') ? '📁' : (c.name.includes('note') ? '📝' : (c.name.includes('sec') ? '🔒' : '📦'));
+          return `
+            <div class="nav-item ${isActive ? 'active' : ''}" onclick="selectCollection('${c.name}')">
+              <span class="nav-item-name">${icon} ${c.name}</span>
+              <span class="pill-count">${c.record_count}</span>
+            </div>
+          `;
+        }).join('');
+
+        select.innerHTML = collectionsList.map(c => `
+          <option value="${c.name}" ${c.name === currentCollection ? 'selected' : ''}>${c.name}</option>
+        `).join('');
+
+        renderFieldsBar();
+      } catch (e) {
+        console.error('Failed to load collections:', e);
+      }
+    }
+
+    function selectCollection(name) {
+      currentCollection = name;
+      document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
+      document.getElementById('view-records').style.display = 'block';
+      document.getElementById('view-mesh').style.display = 'none';
+      document.getElementById('view-audits').style.display = 'none';
+      document.getElementById('view-settings').style.display = 'none';
+
+      document.getElementById('schema-fields-bar').style.display = 'flex';
+      document.getElementById('search-box-wrap').style.display = 'block';
+      document.getElementById('btn-new-record').style.display = 'inline-flex';
+      document.getElementById('btn-toggle-fields').style.display = 'inline-flex';
+
+      const icon = name.includes('file') ? '📁' : (name.includes('note') ? '📝' : (name.includes('sec') ? '🔒' : '📦'));
+      document.getElementById('topbar-col-icon').textContent = icon;
+      document.getElementById('topbar-col-name').textContent = name;
+
+      loadCollections();
+      loadRecordsForCollection(name);
+    }
+
+    function switchSystemTab(tab) {
+      document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
+      document.getElementById('nav-item-' + tab).classList.add('active');
+
+      document.getElementById('view-records').style.display = 'none';
+      document.getElementById('view-mesh').style.display = 'none';
+      document.getElementById('view-audits').style.display = 'none';
+      document.getElementById('view-settings').style.display = 'none';
+      document.getElementById('schema-fields-bar').style.display = 'none';
+      document.getElementById('search-box-wrap').style.display = 'none';
+      document.getElementById('btn-new-record').style.display = 'none';
+      document.getElementById('btn-toggle-fields').style.display = 'none';
+
+      document.getElementById('view-' + tab).style.display = 'block';
+
+      if (tab === 'mesh') {
+        document.getElementById('topbar-col-icon').textContent = '🌐';
+        document.getElementById('topbar-col-name').textContent = 'P2P Mesh & Reticulum';
+      } else if (tab === 'audits') {
+        document.getElementById('topbar-col-icon').textContent = '⚡';
+        document.getElementById('topbar-col-name').textContent = 'Auditing & Lightning Escrow';
+      } else if (tab === 'settings') {
+        document.getElementById('topbar-col-icon').textContent = '⚙️';
+        document.getElementById('topbar-col-name').textContent = 'Settings & Updates';
+      }
+    }
+
+    function renderFieldsBar() {
+      const col = collectionsList.find(c => c.name === currentCollection);
+      const fields = (col && col.fields) ? col.fields : defaultFields;
+
+      const container = document.getElementById('fields-chips-container');
+      container.innerHTML = fields.map(f => `
+        <div class="field-chip">
+          <span class="field-chip-name">${f.name}</span>
+          <span class="field-chip-type">${f.type}</span>
+        </div>
+      `).join('');
+    }
+
+    function toggleFieldsBar() {
+      const bar = document.getElementById('schema-fields-bar');
+      bar.style.display = bar.style.display === 'none' ? 'flex' : 'none';
+    }
+
+    async function loadRecordsForCollection(collectionName) {
+      try {
+        const res = await fetch('/api/dashboard/records?collection=' + encodeURIComponent(collectionName));
+        const data = await res.json();
+        currentRecords = data.records || [];
+        document.getElementById('topbar-col-records-count').textContent = `${data.total || 0} records`;
+        renderRecordsTable(currentRecords);
+      } catch (e) {
+        console.error('Failed to load records:', e);
+      }
+    }
+
+    function renderRecordsTable(records) {
+      const tbody = document.getElementById('records-table-body');
+      if (!records || records.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:30px;">No records in collection "${currentCollection}". Click "+ New Record" to create one.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = records.map(r => {
+        const shortID = r.data_id ? (r.data_id.length > 22 ? r.data_id.substring(0, 18) + '...' : r.data_id) : '-';
+        const fileDisplay = r.file_name 
+          ? `<a href="/api/records/${r.data_id}/file" target="_blank" style="color:var(--accent);text-decoration:none;">📎 ${r.file_name}</a>` 
+          : '<span style="color:var(--text-muted);">-</span>';
+        
+        const lockboxBadges = (r.lockboxes && r.lockboxes.length > 0)
+          ? `<span class="badge badge-purple">🔒 2-of-3 (${r.lockboxes.length} shares)</span>`
+          : '<span class="badge badge-primary">2-of-3 Active</span>';
+
+        const aclBadge = (r.acl && r.acl.length > 0)
+          ? `<span class="badge badge-success">${r.acl.length} Collaborator(s)</span>`
+          : '<span class="badge" style="background:#273549;color:var(--text-muted);">Owner Only</span>';
+
+        const textPreview = r.text ? (r.text.length > 35 ? r.text.substring(0, 32) + '...' : r.text) : '<span style="color:var(--text-muted);">(empty)</span>';
+
+        return `
+          <tr>
+            <td class="mono" style="font-weight:600;color:var(--accent);cursor:pointer;" title="Click to inspect" onclick="inspectRecord('${r.data_id}')">${shortID}</td>
+            <td><span class="badge badge-primary">v${r.version}</span></td>
+            <td>${textPreview}</td>
+            <td>${fileDisplay}</td>
+            <td>${lockboxBadges}</td>
+            <td>${aclBadge}</td>
+            <td>${new Date(r.updated_at).toLocaleString()}</td>
+            <td style="text-align:right;">
+              <button class="btn btn-secondary btn-sm" onclick="inspectRecord('${r.data_id}')">Inspect</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteRecordPrompt('${r.data_id}')">Delete</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function filterRecords() {
+      const q = document.getElementById('record-search-input').value.toLowerCase().trim();
+      if (!q) {
+        renderRecordsTable(currentRecords);
+        return;
+      }
+      const filtered = currentRecords.filter(r => 
+        (r.data_id && r.data_id.toLowerCase().includes(q)) ||
+        (r.text && r.text.toLowerCase().includes(q)) ||
+        (r.file_name && r.file_name.toLowerCase().includes(q))
+      );
+      renderRecordsTable(filtered);
+    }
+
+    function inspectRecord(dataID) {
+      activeRecord = currentRecords.find(r => r.data_id === dataID);
+      if (!activeRecord) return;
+
+      document.getElementById('detail-modal-title').textContent = `Record: ${activeRecord.data_id}`;
+      document.getElementById('detail-data-id').textContent = activeRecord.data_id;
+      document.getElementById('detail-version').value = 'v' + activeRecord.version;
+      document.getElementById('detail-text').value = activeRecord.text || '';
+      document.getElementById('detail-merkle').value = activeRecord.merkle_root || '-';
+
+      const fileRow = document.getElementById('detail-file-row');
+      if (activeRecord.file_name) {
+        fileRow.style.display = 'block';
+        document.getElementById('detail-filename').textContent = activeRecord.file_name;
+        document.getElementById('detail-file-download').href = `/api/records/${activeRecord.data_id}/file`;
+      } else {
+        fileRow.style.display = 'none';
+      }
+
+      // Render ACL in modal
+      renderModalACL();
+
+      // Render Chunks in modal
+      renderModalChunks();
+
+      switchInspectorTab('data');
+      openModal('modal-record-detail');
+    }
+
+    function renderModalACL() {
+      const tbody = document.getElementById('detail-acl-tbody');
+      if (!activeRecord.acl || activeRecord.acl.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:14px;">Owner only (No external collaborators)</td></tr>';
+        return;
+      }
+      tbody.innerHTML = activeRecord.acl.map(c => `
+        <tr>
+          <td class="mono" style="font-size:0.75rem;">${c.user_pub_key.length > 25 ? c.user_pub_key.substring(0, 22) + '...' : c.user_pub_key}</td>
+          <td><span class="badge ${c.permission === 'edit' ? 'badge-primary' : 'badge-success'}">${c.permission.toUpperCase()}</span></td>
+          <td>${new Date(c.added_at).toLocaleDateString()}</td>
+          <td style="text-align:right;">
+            <button class="btn btn-danger btn-sm" onclick="revokeCollaborator('${c.user_pub_key}')">Revoke</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function renderModalChunks() {
+      const tbody = document.getElementById('detail-chunks-tbody');
+      if (!activeRecord.file_chunk_hash) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:14px;">No attached chunks (Text only record).</td></tr>';
+        return;
+      }
+      tbody.innerHTML = `
+        <tr>
+          <td>1</td>
+          <td class="mono" style="font-size:0.75rem;">${activeRecord.file_chunk_hash.substring(0, 16)}...</td>
+          <td class="mono" style="font-size:0.75rem;">AES-256-GCM (Protected)</td>
+          <td>${(activeRecord.total_bytes / 1024).toFixed(1)} KB</td>
+          <td><span class="badge badge-success">Stored</span></td>
+        </tr>
+      `;
+    }
+
+    function switchInspectorTab(tab) {
+      document.querySelectorAll('.inspector-tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.getElementById('inspector-tab-data').style.display = 'none';
+      document.getElementById('inspector-tab-acl').style.display = 'none';
+      document.getElementById('inspector-tab-lockbox').style.display = 'none';
+      document.getElementById('inspector-tab-manifest').style.display = 'none';
+
+      document.getElementById('inspector-tab-' + tab).style.display = 'block';
       event.target.classList.add('active');
+    }
+
+    async function submitUpdateRecordText() {
+      if (!activeRecord) return;
+      const text = document.getElementById('detail-text').value;
+      try {
+        const res = await fetch('/api/records/' + activeRecord.data_id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            updater_pub_key: activeRecord.user_pub_address || '',
+            text: text
+          })
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          return alert('Update failed: ' + err);
+        }
+        alert('Record updated successfully!');
+        closeModal('modal-record-detail');
+        refreshCurrentView();
+      } catch (e) {
+        alert('Failed to update: ' + e);
+      }
+    }
+
+    async function submitAddCollaborator() {
+      if (!activeRecord) return;
+      const pubKey = document.getElementById('new-collab-key').value.trim();
+      const perm = document.getElementById('new-collab-perm').value;
+      if (!pubKey) return alert('Please enter a public key');
+
+      try {
+        const res = await fetch(`/api/records/${activeRecord.data_id}/collaborators`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            owner_pub_key: activeRecord.user_pub_address || '',
+            collaborator: {
+              user_pub_key: pubKey,
+              permission: perm
+            }
+          })
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          return alert('Failed to add collaborator: ' + err);
+        }
+        alert('Collaborator added!');
+        document.getElementById('new-collab-key').value = '';
+        closeModal('modal-record-detail');
+        refreshCurrentView();
+      } catch (e) {
+        alert('Failed: ' + e);
+      }
+    }
+
+    async function revokeCollaborator(pubKey) {
+      if (!activeRecord) return;
+      if (!confirm(`Revoke permissions for ${pubKey.substring(0, 16)}...?`)) return;
+
+      try {
+        const res = await fetch(`/api/records/${activeRecord.data_id}/collaborators`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            owner_pub_key: activeRecord.user_pub_address || '',
+            collaborator_pub_key: pubKey
+          })
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          return alert('Failed to revoke: ' + err);
+        }
+        alert('Collaborator revoked!');
+        closeModal('modal-record-detail');
+        refreshCurrentView();
+      } catch (e) {
+        alert('Failed: ' + e);
+      }
+    }
+
+    async function submitPurgeLockbox() {
+      if (!activeRecord) return;
+      const friendID = document.getElementById('purge-friend-id').value.trim();
+      if (!friendID) return alert('Please enter a friend identifier');
+
+      try {
+        const res = await fetch(`/api/records/${activeRecord.data_id}/lockbox?friend_id=${encodeURIComponent(friendID)}`, {
+          method: 'DELETE',
+          headers: {
+            'X-User-PubKey': activeRecord.user_pub_address || ''
+          }
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          return alert('Failed to purge lockbox: ' + err);
+        }
+        alert('Share slot successfully purged from this node! Access permanently revoked.');
+        document.getElementById('purge-friend-id').value = '';
+      } catch (e) {
+        alert('Failed: ' + e);
+      }
+    }
+
+    async function deleteRecordPrompt(dataID) {
+      if (!confirm(`Are you sure you want to delete record ${dataID}?`)) return;
+      try {
+        const res = await fetch(`/api/records/${dataID}`, {
+          method: 'DELETE'
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          return alert('Failed to delete: ' + err);
+        }
+        alert('Record deleted.');
+        refreshCurrentView();
+      } catch (e) {
+        alert('Delete failed: ' + e);
+      }
+    }
+
+    async function submitCreateRecord() {
+      const col = document.getElementById('new-record-collection').value;
+      const text = document.getElementById('new-record-text').value;
+      const owner = document.getElementById('new-record-owner').value.trim();
+      let policy = document.getElementById('new-record-policy').value;
+      const nodes = document.getElementById('new-record-nodes').value.trim();
+      const fileInput = document.getElementById('new-record-file');
+
+      const formData = new FormData();
+      formData.append('collection', col);
+      formData.append('text', text);
+      if (owner) formData.append('user_pub_address', owner);
+      if (nodes) {
+        formData.append('storage_peers', nodes);
+        if (policy !== 'local') {
+          policy = 'custom';
+        }
+      }
+      formData.append('replication_policy', policy);
+
+      if (fileInput.files.length > 0) {
+        formData.append('file', fileInput.files[0]);
+      }
+
+      try {
+        const res = await fetch('/api/records', {
+          method: 'POST',
+          body: formData
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          return alert('Failed to create record: ' + err);
+        }
+        closeModal('modal-new-record');
+        document.getElementById('new-record-text').value = '';
+        document.getElementById('new-record-nodes').value = '';
+        fileInput.value = '';
+        selectCollection(col);
+      } catch (e) {
+        alert('Create failed: ' + e);
+      }
+    }
+
+    async function submitCreateCollection() {
+      const name = document.getElementById('new-collection-name').value.trim();
+      if (!name) return alert('Please enter a collection name');
+
+      try {
+        const res = await fetch('/api/dashboard/collections', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name })
+        });
+        if (!res.ok) {
+          const err = await res.text();
+          return alert('Failed: ' + err);
+        }
+        closeModal('modal-new-collection');
+        document.getElementById('new-collection-name').value = '';
+        await loadCollections();
+        selectCollection(name);
+      } catch (e) {
+        alert('Failed: ' + e);
+      }
+    }
+
+    function openNewRecordModal() {
+      document.getElementById('new-record-collection').value = currentCollection;
+      openModal('modal-new-record');
+    }
+
+    function openNewCollectionModal() {
+      openModal('modal-new-collection');
+    }
+
+    function openModal(id) {
+      document.getElementById(id).style.display = 'flex';
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).style.display = 'none';
+    }
+
+    function refreshCurrentView() {
+      loadStats();
+      loadCollections();
+      loadRecordsForCollection(currentCollection);
     }
 
     async function loadStats() {
@@ -575,30 +1519,31 @@
         } else {
           document.getElementById('node-name-badge').textContent = data.node_id;
         }
-        if (data.public_ip) {
-          document.getElementById('node-ip-badge').textContent = `Public IP: ${data.public_ip}`;
-          document.getElementById('node-ip-badge').style.display = 'inline-block';
+
+        document.getElementById('stat-storage').innerText = (data.storage.used_bytes / 1024).toFixed(1) + ' KB';
+        document.getElementById('mode-badge').innerText = data.is_public ? 'Public' : 'Local';
+        if (data.reticulum_dest) {
+          currentRnsDest = data.reticulum_dest;
+          document.getElementById('rns-dest').innerText = data.reticulum_dest;
         } else {
-          document.getElementById('node-ip-badge').style.display = 'none';
+          document.getElementById('rns-dest').innerText = 'Not configured';
         }
 
-        document.getElementById('stat-records').innerText = data.storage.record_count;
-        document.getElementById('stat-storage').innerText = (data.storage.used_bytes / 1024).toFixed(1) + ' KB';
-        document.getElementById('stat-mode').innerText = data.mode;
-        document.getElementById('mode-badge').innerText = data.is_public ? 'Public Gateway' : 'Private Node';
-        document.getElementById('rns-dest').innerText = data.reticulum_dest || 'Not configured';
-        document.getElementById('rns-badge').innerText = 'RNS: ' + (data.reticulum_dest ? 'Active' : 'Offline');
         const rnsSub = document.getElementById('rns-sub');
         if (rnsSub) {
           rnsSub.innerText = data.reticulum_gateway ? ('Gateway: ' + data.reticulum_gateway) : '16-byte cryptographic RNS address';
         }
+
         const onlineCount = data.online_peers_count !== undefined ? data.online_peers_count : data.peers_count;
         document.getElementById('stat-peers').innerHTML = `${onlineCount} <span style="font-size:0.9rem;font-weight:normal;color:var(--text-muted);">/ ${data.peers_count} Online</span>`;
+        document.getElementById('sidebar-peers-count').textContent = onlineCount;
+        document.getElementById('sidebar-sats-count').textContent = data.total_sats_accrued + ' S';
+
         document.getElementById('stat-contracts').innerText = data.contracts_count;
         document.getElementById('stat-sats').innerText = data.total_sats_accrued + ' Sats';
         document.getElementById('stat-audits').innerText = data.audit_count;
 
-        // Pricing Policy UI
+        // Pricing policy UI
         if (data.pricing_policy) {
           currentPolicy = data.pricing_policy;
           const toggle = document.getElementById('pricing-free-toggle');
@@ -619,12 +1564,11 @@
             priceRow.style.opacity = '1.0';
           }
           document.getElementById('price-per-gb').value = currentPolicy.price_per_gb_month;
-
-          // Whitelist pills
           renderWhitelistPills(currentPolicy.free_whitelist || []);
+          renderBlacklistPills(currentPolicy.blacklist || []);
         }
 
-        // Storage & Retention Breakdown
+        // Storage & Retention
         if (data.storage) {
           const maxGb = (data.storage.max_bytes / (1024 * 1024 * 1024)).toFixed(1);
           document.getElementById('quota-input-gb').value = Math.round(data.storage.max_bytes / (1024 * 1024 * 1024)) || 50;
@@ -645,67 +1589,39 @@
           document.getElementById('cap-grace-bar').style.width = grcPct + '%';
         }
 
-        // Render records table
-        const recRes = await fetch('/api/dashboard/records');
-        const recData = await recRes.json();
-        if (recData.records && recData.records.length > 0) {
-          const tbody = document.getElementById('records-table-body');
-          tbody.innerHTML = recData.records.map(r => {
-            const quorumBadges = (r.storage_peers || []).map(sp => 
-              `<span class="badge ${sp.includes('delta') ? 'badge-danger' : 'badge-primary'}" style="margin-right:3px;font-size:0.75rem;padding:2px 6px;">${sp}</span>`
-            ).join('') || '<span style="color:var(--text-muted);">-</span>';
-            return `
-            <tr>
-              <td class="mono" style="font-weight:600;color:var(--accent);">${r.data_id}</td>
-              <td>${r.collection}</td>
-              <td><span class="badge badge-primary">v${r.version}</span></td>
-              <td class="mono">${r.user_pub_address ? (r.user_pub_address.length > 20 ? r.user_pub_address.substring(0,18)+'...' : r.user_pub_address) : 'Anonymous'}</td>
-              <td>${quorumBadges}</td>
-              <td>${r.acl ? r.acl.length + ' Collaborators' : 'Owner Only'}</td>
-              <td class="mono">${r.merkle_root ? r.merkle_root.substring(0,12)+'...' : '-'}</td>
-              <td>${new Date(r.updated_at).toLocaleString()}</td>
-            </tr>
-          `;
-          }).join('');
-        }
-
-        // Render peers
+        // Peers table
         if (data.peers && data.peers.length > 0) {
           const ptbody = document.getElementById('peers-table-body');
           ptbody.innerHTML = data.peers.map(p => {
             const isOnline = p.is_online !== false;
             const statusBadge = isOnline 
-              ? '<span class="badge badge-success" style="display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#3fb950;"></span>ONLINE</span>'
-              : '<span class="badge badge-danger" style="background:rgba(248,81,73,0.2);color:#ff7b72;border:1px solid #f85149;display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#f85149;"></span>OFFLINE</span>';
-            const rowStyle = isOnline ? '' : 'style="opacity:0.65;background:rgba(248,81,73,0.06);"';
-            const latencyStr = isOnline ? (p.avg_latency_ms > 0 ? p.avg_latency_ms.toFixed(1) + ' ms' : '< 1 ms') : '<span style="color:#ff7b72;">Unreachable</span>';
-            const nameDisplay = p.name ? `<strong>${p.name}</strong> <span style="font-size:0.75rem;color:var(--text-muted);">(${p.node_id})</span>` : `<strong>${p.node_id}</strong>`;
-            const locDisplay = p.location ? `<span>${p.location}</span>` : `<span style="color:var(--text-muted);">-</span>`;
-            const ipDisplay = p.public_ip ? `<span class="mono" style="color:var(--accent); font-weight:600;">${p.public_ip}</span>` : `<span class="mono" style="color:var(--text-muted);">${p.public_addr || '-'}</span>`;
+              ? '<span class="badge badge-success">ONLINE</span>'
+              : '<span class="badge badge-danger">OFFLINE</span>';
+            const latencyStr = isOnline ? (p.avg_latency_ms > 0 ? p.avg_latency_ms.toFixed(1) + ' ms' : '< 1 ms') : 'Unreachable';
             return `
-            <tr ${rowStyle}>
-              <td>${statusBadge}</td>
-              <td class="mono">${nameDisplay}</td>
-              <td>${locDisplay}</td>
-              <td>${ipDisplay}</td>
-              <td class="mono" style="font-size:0.8rem;color:var(--text-muted);">${p.public_addr || p.reticulum_dest || '-'}</td>
-              <td>${p.is_public ? '<span class="badge badge-primary">Public</span>' : '<span class="badge badge-warning">Private</span>'}</td>
-              <td>${p.price_per_gb_month === 0 ? '<span class="badge badge-success">Free</span>' : (p.price_per_gb_month + ' sats')}</td>
-              <td>${latencyStr}</td>
-              <td><strong>${p.social_score.toFixed(1)}</strong></td>
-            </tr>
-          `;
+              <tr>
+                <td>${statusBadge}</td>
+                <td class="mono"><strong>${p.name || p.node_id}</strong></td>
+                <td>${p.location || '-'}</td>
+                <td class="mono">${p.public_ip || '-'}</td>
+                <td class="mono" style="font-size:0.75rem;">${p.public_addr || p.reticulum_dest || '-'}</td>
+                <td>${p.is_public ? '<span class="badge badge-primary">Public</span>' : '<span class="badge badge-warning">Private</span>'}</td>
+                <td>${p.price_per_gb_month === 0 ? '<span class="badge badge-success">Free</span>' : (p.price_per_gb_month + ' sats')}</td>
+                <td>${latencyStr}</td>
+                <td><strong>${p.social_score.toFixed(1)}</strong></td>
+              </tr>
+            `;
           }).join('');
         }
 
-        // Render recent audits
+        // Audits table
         if (data.recent_audits && data.recent_audits.length > 0) {
           const atbody = document.getElementById('audits-table-body');
           atbody.innerHTML = data.recent_audits.slice().reverse().map(a => `
             <tr>
               <td class="mono" style="font-weight:600;color:var(--accent);">${a.challenge_id}</td>
-              <td class="mono" style="font-weight:600;">${a.storage_node}</td>
-              <td>${a.passed ? '<span class="badge badge-success">✓ PASSED</span>' : '<span class="badge badge-warning" style="background:rgba(248,81,73,0.2);color:#ff7b72;border:1px solid #f85149;">✕ FAILED (OFFLINE)</span>'}</td>
+              <td class="mono">${a.storage_node}</td>
+              <td>${a.passed ? '<span class="badge badge-success">✓ PASSED</span>' : '<span class="badge badge-danger">✕ FAILED</span>'}</td>
               <td>${new Date(a.timestamp).toLocaleTimeString()}</td>
               <td>${a.latency_ms > 0 ? a.latency_ms.toFixed(1) + ' ms' : '-'}</td>
               <td>${a.notes}</td>
@@ -714,16 +1630,6 @@
         }
       } catch (e) {
         console.error('Failed to load stats:', e);
-      }
-    }
-
-    async function triggerAudit() {
-      try {
-        const res = await fetch('/api/audit/trigger');
-        const data = await res.json();
-        loadStats();
-      } catch (e) {
-        alert('Failed to trigger audit: ' + e);
       }
     }
 
@@ -736,7 +1642,7 @@
       container.innerHTML = list.map(addr => `
         <div class="whitelist-pill mono">
           <span>${addr}</span>
-          <button class="pill-remove" title="Remove from whitelist" onclick="removeWhitelistAddress('${addr}')">&times;</button>
+          <button class="pill-remove" title="Remove" onclick="removeWhitelistAddress('${addr}')">&times;</button>
         </div>
       `).join('');
     }
@@ -750,7 +1656,7 @@
         });
         loadStats();
       } catch (e) {
-        alert('Failed to update pricing policy: ' + e);
+        alert('Failed: ' + e);
       }
     }
 
@@ -763,10 +1669,10 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ price_per_gb_month: price })
         });
-        alert('Storage price updated to ' + price + ' sats/GB/month!');
+        alert('Storage price updated!');
         loadStats();
       } catch (e) {
-        alert('Failed to update price: ' + e);
+        alert('Failed: ' + e);
       }
     }
 
@@ -783,7 +1689,7 @@
         input.value = '';
         loadStats();
       } catch (e) {
-        alert('Failed to add whitelist: ' + e);
+        alert('Failed: ' + e);
       }
     }
 
@@ -796,13 +1702,306 @@
         });
         loadStats();
       } catch (e) {
-        alert('Failed to remove whitelist: ' + e);
+        alert('Failed: ' + e);
+      }
+    }
+
+    function renderBlacklistPills(list) {
+      const container = document.getElementById('blacklist-pills');
+      if (!container) return;
+      if (!list || list.length === 0) {
+        container.innerHTML = '<span style="color:var(--text-muted);font-size:0.85rem;">No addresses blacklisted yet. Node is open to all non-abusive clients.</span>';
+        return;
+      }
+      container.innerHTML = list.map(addr => `
+        <div class="blacklist-pill mono">
+          <span>${addr}</span>
+          <button class="pill-remove" title="Unban / Remove" onclick="removeBlacklistAddress('${addr}')">&times;</button>
+        </div>
+      `).join('');
+    }
+
+    async function addBlacklistAddress() {
+      const input = document.getElementById('blacklist-address-input');
+      const addr = input.value.trim();
+      if (!addr) return alert('Please enter a public key or Reticulum address to ban');
+      try {
+        await fetch('/api/escrow/blacklist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'add', address: addr })
+        });
+        input.value = '';
+        loadStats();
+      } catch (e) {
+        alert('Failed: ' + e);
+      }
+    }
+
+    async function removeBlacklistAddress(addr) {
+      try {
+        await fetch('/api/escrow/blacklist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'remove', address: addr })
+        });
+        loadStats();
+      } catch (e) {
+        alert('Failed: ' + e);
+      }
+    }
+
+    // --- Offline QR Code Generator (Pure JS, Zero external dependencies) ---
+    function createQRCode(text) {
+      const EXP = new Uint8Array(512);
+      const LOG = new Uint8Array(256);
+      let x = 1;
+      for (let i = 0; i < 255; i++) {
+        EXP[i] = x;
+        EXP[i + 255] = x;
+        LOG[x] = i;
+        x <<= 1;
+        if (x & 256) x ^= 0x11d;
+      }
+      function gfMul(a, b) {
+        if (a === 0 || b === 0) return 0;
+        return EXP[LOG[a] + LOG[b]];
+      }
+      function rsGenPoly(n) {
+        let p = [1];
+        for (let i = 0; i < n; i++) {
+          let next = new Array(p.length + 1).fill(0);
+          for (let j = 0; j < p.length; j++) {
+            next[j] ^= gfMul(p[j], EXP[i]);
+            next[j + 1] ^= p[j];
+          }
+          p = next;
+        }
+        return p;
+      }
+      function rsEncode(data, numEC) {
+        const gen = rsGenPoly(numEC);
+        const res = new Uint8Array(numEC);
+        for (let i = 0; i < data.length; i++) {
+          const factor = data[i] ^ res[0];
+          for (let j = 0; j < numEC - 1; j++) {
+            res[j] = res[j + 1] ^ gfMul(gen[numEC - 1 - j], factor);
+          }
+          res[numEC - 1] = gfMul(gen[0], factor);
+        }
+        return res;
+      }
+
+      const VERSIONS = [
+        null,
+        { ver: 1, size: 21, dataCap: 16, ecBytes: 10, blocks: 1, align: [] },
+        { ver: 2, size: 25, dataCap: 28, ecBytes: 16, blocks: 1, align: [6, 18] },
+        { ver: 3, size: 29, dataCap: 44, ecBytes: 26, blocks: 1, align: [6, 22] },
+        { ver: 4, size: 33, dataCap: 64, ecBytes: 18, blocks: 2, align: [6, 26] },
+        { ver: 5, size: 37, dataCap: 86, ecBytes: 24, blocks: 2, align: [6, 30] },
+        { ver: 6, size: 41, dataCap: 108, ecBytes: 16, blocks: 4, align: [6, 34] },
+        { ver: 7, size: 45, dataCap: 124, ecBytes: 18, blocks: 4, align: [6, 22, 38] },
+        { ver: 8, size: 49, dataCap: 154, ecBytes: 22, blocks: 4, align: [6, 24, 42] }
+      ];
+
+      const utf8 = new TextEncoder().encode(text);
+      let vInfo = null;
+      for (let v = 1; v < VERSIONS.length; v++) {
+        if (VERSIONS[v].dataCap >= utf8.length + 3) {
+          vInfo = VERSIONS[v];
+          break;
+        }
+      }
+      if (!vInfo) vInfo = VERSIONS[VERSIONS.length - 1];
+
+      let bitBuf = [];
+      function putBits(val, len) {
+        for (let i = len - 1; i >= 0; i--) {
+          bitBuf.push((val >> i) & 1);
+        }
+      }
+
+      putBits(4, 4); // Byte mode
+      putBits(utf8.length, 8);
+      for (let b of utf8) putBits(b, 8);
+      for (let i = 0; i < 4 && bitBuf.length < vInfo.dataCap * 8; i++) bitBuf.push(0);
+      while (bitBuf.length % 8 !== 0) bitBuf.push(0);
+
+      let dataBytes = new Uint8Array(vInfo.dataCap);
+      for (let i = 0; i < bitBuf.length / 8; i++) {
+        let b = 0;
+        for (let j = 0; j < 8; j++) b = (b << 1) | bitBuf[i * 8 + j];
+        dataBytes[i] = b;
+      }
+      const pad = [0xEC, 0x11];
+      let pIdx = 0;
+      for (let i = bitBuf.length / 8; i < vInfo.dataCap; i++) {
+        dataBytes[i] = pad[pIdx++ % 2];
+      }
+
+      const blockSize = Math.floor(vInfo.dataCap / vInfo.blocks);
+      const blocksData = [];
+      const blocksEC = [];
+      for (let b = 0; b < vInfo.blocks; b++) {
+        const chunk = dataBytes.slice(b * blockSize, (b + 1) * blockSize);
+        blocksData.push(chunk);
+        blocksEC.push(rsEncode(chunk, vInfo.ecBytes));
+      }
+
+      let interleaved = [];
+      for (let i = 0; i < blockSize; i++) {
+        for (let b = 0; b < vInfo.blocks; b++) {
+          interleaved.push(blocksData[b][i]);
+        }
+      }
+      for (let i = 0; i < vInfo.ecBytes; i++) {
+        for (let b = 0; b < vInfo.blocks; b++) {
+          interleaved.push(blocksEC[b][i]);
+        }
+      }
+
+      const N = vInfo.size;
+      const mat = Array.from({ length: N }, () => new Int8Array(N).fill(-1));
+
+      function setFinder(r, c) {
+        for (let dr = -1; dr <= 7; dr++) {
+          for (let dc = -1; dc <= 7; dc++) {
+            const nr = r + dr, nc = c + dc;
+            if (nr < 0 || nr >= N || nc < 0 || nc >= N) continue;
+            if (dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6) {
+              mat[nr][nc] = (dr === 0 || dr === 6 || dc === 0 || dc === 6 || (dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4)) ? 1 : 0;
+            } else {
+              mat[nr][nc] = 0;
+            }
+          }
+        }
+      }
+
+      setFinder(0, 0);
+      setFinder(0, N - 7);
+      setFinder(N - 7, 0);
+
+      for (let i = 8; i < N - 8; i++) {
+        mat[6][i] = (i % 2 === 0) ? 1 : 0;
+        mat[i][6] = (i % 2 === 0) ? 1 : 0;
+      }
+
+      if (vInfo.align.length > 0) {
+        for (let r of vInfo.align) {
+          for (let c of vInfo.align) {
+            if (mat[r][c] !== -1) continue;
+            for (let dr = -2; dr <= 2; dr++) {
+              for (let dc = -2; dc <= 2; dc++) {
+                mat[r + dr][c + dc] = (Math.abs(dr) === 2 || Math.abs(dc) === 2 || (dr === 0 && dc === 0)) ? 1 : 0;
+              }
+            }
+          }
+        }
+      }
+
+      for (let i = 0; i < 9; i++) {
+        if (mat[8][i] === -1) mat[8][i] = 0;
+        if (mat[i][8] === -1) mat[i][8] = 0;
+      }
+      for (let i = 0; i < 8; i++) {
+        if (mat[8][N - 1 - i] === -1) mat[8][N - 1 - i] = 0;
+        if (mat[N - 1 - i][8] === -1) mat[N - 1 - i][8] = 0;
+      }
+      mat[N - 8][8] = 1;
+
+      let allBits = [];
+      for (let b of interleaved) {
+        for (let i = 7; i >= 0; i--) allBits.push((b >> i) & 1);
+      }
+
+      let bitIdx = 0;
+      let up = true;
+      for (let right = N - 1; right > 0; right -= 2) {
+        if (right === 6) right--;
+        const rows = up ? Array.from({ length: N }, (_, i) => N - 1 - i) : Array.from({ length: N }, (_, i) => i);
+        for (let r of rows) {
+          for (let c of [right, right - 1]) {
+            if (mat[r][c] === -1) {
+              const bit = bitIdx < allBits.length ? allBits[bitIdx++] : 0;
+              const mask = ((r + c) % 2 === 0) ? 1 : 0;
+              mat[r][c] = bit ^ mask;
+            }
+          }
+        }
+        up = !up;
+      }
+
+      const formatBits = [1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0];
+      mat[8][0] = formatBits[0];
+      mat[8][1] = formatBits[1];
+      mat[8][2] = formatBits[2];
+      mat[8][3] = formatBits[3];
+      mat[8][4] = formatBits[4];
+      mat[8][5] = formatBits[5];
+      mat[8][7] = formatBits[6];
+      mat[8][8] = formatBits[7];
+      mat[7][8] = formatBits[8];
+      mat[5][8] = formatBits[9];
+      mat[4][8] = formatBits[10];
+      mat[3][8] = formatBits[11];
+      mat[2][8] = formatBits[12];
+      mat[1][8] = formatBits[13];
+      mat[0][8] = formatBits[14];
+
+      for (let i = 0; i < 7; i++) mat[N - 1 - i][8] = formatBits[i];
+      for (let i = 0; i < 8; i++) mat[8][N - 8 + i] = formatBits[7 + i];
+
+      return { size: N, matrix: mat };
+    }
+
+    function renderQRCodeSVG(text, pixelSize = 220) {
+      if (!text) text = 'testcloud-node';
+      const { size, matrix } = createQRCode(text);
+      const scale = pixelSize / (size + 8);
+      let paths = [];
+      for (let r = 0; r < size; r++) {
+        for (let c = 0; c < size; c++) {
+          if (matrix[r][c] === 1) {
+            const x = (c + 4) * scale;
+            const y = (r + 4) * scale;
+            paths.push(`M${x.toFixed(1)},${y.toFixed(1)}h${scale.toFixed(1)}v${scale.toFixed(1)}h-${scale.toFixed(1)}z`);
+          }
+        }
+      }
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${pixelSize} ${pixelSize}" width="${pixelSize}" height="${pixelSize}">
+        <rect width="${pixelSize}" height="${pixelSize}" fill="#ffffff" rx="8"/>
+        <path d="${paths.join(' ')}" fill="#000000"/>
+      </svg>`;
+    }
+
+    function openNodeQRModal() {
+      const dest = currentRnsDest || document.getElementById('rns-dest').textContent || 'testcloud-node';
+      const cleanDest = (dest === '-' || !dest) ? 'testcloud-node' : dest;
+      document.getElementById('qr-modal-rnode-input').value = cleanDest;
+      const container = document.getElementById('rnode-qr-container');
+      try {
+        container.innerHTML = renderQRCodeSVG(cleanDest, 220);
+      } catch (e) {
+        container.innerHTML = `<span style="color:#000;font-family:monospace;word-break:break-all;">${cleanDest}</span>`;
+      }
+      openModal('modal-rnode-qr');
+    }
+
+    function copyRNodeAddress() {
+      const input = document.getElementById('qr-modal-rnode-input');
+      if (!input) return;
+      navigator.clipboard.writeText(input.value);
+      const btn = document.getElementById('btn-copy-rnode');
+      if (btn) {
+        const orig = btn.innerText;
+        btn.innerText = 'Copied!';
+        setTimeout(() => { btn.innerText = orig; }, 2000);
       }
     }
 
     async function updateQuota() {
       const gb = parseInt(document.getElementById('quota-input-gb').value);
-      if (isNaN(gb) || gb <= 0) return alert('Please enter a valid quota in GB');
+      if (isNaN(gb) || gb <= 0) return alert('Please enter a valid quota');
       const bytes = gb * 1024 * 1024 * 1024;
       try {
         await fetch('/api/storage/quota', {
@@ -810,10 +2009,10 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ max_bytes: bytes })
         });
-        alert('Storage quota updated to ' + gb + ' GB!');
+        alert('Storage quota updated!');
         loadStats();
       } catch (e) {
-        alert('Failed to update quota: ' + e);
+        alert('Failed: ' + e);
       }
     }
 
@@ -835,9 +2034,30 @@
       }
     }
 
+    // Init
+    loadCollections().then(() => {
+      loadRecordsForCollection(currentCollection);
+    });
     loadStats();
     checkUpdates();
     setInterval(loadStats, 4000);
+
+    function handleHashRouting() {
+      const h = window.location.hash;
+      if (h === '#qr') {
+        openNodeQRModal();
+      } else if (h === '#new') {
+        openNewRecordModal();
+      } else if (h === '#settings') {
+        switchSystemTab('settings');
+      } else if (h === '#mesh') {
+        switchSystemTab('mesh');
+      } else if (h === '#audits') {
+        switchSystemTab('audits');
+      }
+    }
+    window.addEventListener('hashchange', handleHashRouting);
+    setTimeout(handleHashRouting, 350);
   </script>
 </body>
 </html>

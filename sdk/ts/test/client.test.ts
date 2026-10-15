@@ -202,4 +202,41 @@ describe('TestCloudClient', () => {
     assert.equal(capturedBody.replication_policy, 'local-only');
     assert.equal(pbRecord.id, 'pb_rec_999');
   });
+
+  it('should handshake and ensure collection schema and fields with node', async () => {
+    let capturedUrl = '';
+    let capturedBody: any = null;
+
+    const mockFetch: typeof fetch = async (input, init) => {
+      capturedUrl = input.toString();
+      capturedBody = JSON.parse(init?.body?.toString() || '{}');
+      return new Response(JSON.stringify({
+        name: capturedBody.name,
+        record_count: 0,
+        fields: capturedBody.fields,
+        system: false,
+        updated_at: new Date().toISOString(),
+      }), { status: 200 });
+    };
+
+    const client = new TestCloudClient({
+      baseUrl: 'http://localhost:8100',
+      fetch: mockFetch,
+    });
+
+    const info = await client.ensureCollection({
+      name: 'device_telemetry',
+      fields: [
+        { name: 'device_id', type: 'text', required: true },
+        { name: 'temperature', type: 'number', required: false },
+        { name: 'status', type: 'text', required: false },
+      ],
+    });
+
+    assert.equal(capturedUrl, 'http://localhost:8100/api/collections/ensure');
+    assert.equal(capturedBody.name, 'device_telemetry');
+    assert.equal(capturedBody.fields.length, 3);
+    assert.equal(info.name, 'device_telemetry');
+    assert.equal(info.fields[0].name, 'device_id');
+  });
 });

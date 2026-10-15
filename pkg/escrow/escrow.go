@@ -18,6 +18,7 @@ type PricingPolicy struct {
 	FreeForAll      bool     `json:"free_for_all"`       // If true, storage is 100% free for all clients
 	PricePerGBMonth int64    `json:"price_per_gb_month"` // Sats per GB per month (e.g., 100)
 	FreeWhitelist   []string `json:"free_whitelist"`     // List of user_pub_address / Reticulum hashes that are always free
+	Blacklist       []string `json:"blacklist"`          // Banned user public keys / Reticulum hashes blocked from storing or editing
 }
 
 // StorageContract models the time-locked storage agreement funded via Lightning.
@@ -68,6 +69,7 @@ func NewManager(nodeID string, pricePerGB int64, dataDir ...string) *Manager {
 			FreeForAll:      true,
 			PricePerGBMonth: pricePerGB,
 			FreeWhitelist:   []string{},
+			Blacklist:       []string{},
 		},
 		policyFile: pFile,
 		contracts:  make(map[string]*StorageContract),
@@ -187,6 +189,57 @@ func (m *Manager) IsWhitelisted(pubAddress string) bool {
 
 	clean := strings.TrimSpace(pubAddress)
 	for _, a := range m.policy.FreeWhitelist {
+		if strings.EqualFold(a, clean) {
+			return true
+		}
+	}
+	return false
+}
+
+// AddBlacklist adds a public address to the abuse blacklist.
+func (m *Manager) AddBlacklist(pubAddress string) error {
+	pubAddress = strings.TrimSpace(pubAddress)
+	if pubAddress == "" {
+		return errors.New("empty address")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, a := range m.policy.Blacklist {
+		if strings.EqualFold(a, pubAddress) {
+			return nil // already blacklisted
+		}
+	}
+	m.policy.Blacklist = append(m.policy.Blacklist, pubAddress)
+	return m.savePolicyLocked()
+}
+
+// RemoveBlacklist removes a public address from the abuse blacklist.
+func (m *Manager) RemoveBlacklist(pubAddress string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var updated []string
+	for _, a := range m.policy.Blacklist {
+		if !strings.EqualFold(a, strings.TrimSpace(pubAddress)) {
+			updated = append(updated, a)
+		}
+	}
+	m.policy.Blacklist = updated
+	return m.savePolicyLocked()
+}
+
+// IsBlacklisted checks if an address is in the abuse blacklist.
+func (m *Manager) IsBlacklisted(pubAddress string) bool {
+	if pubAddress == "" {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	clean := strings.TrimSpace(pubAddress)
+	for _, a := range m.policy.Blacklist {
 		if strings.EqualFold(a, clean) {
 			return true
 		}

@@ -45,6 +45,7 @@ type Record struct {
 	PictureName      string               `json:"picture_name,omitempty"`
 	TotalBytes       int64                `json:"total_bytes"`
 	ACL              []AccessControlEntry `json:"acl,omitempty"`                // Authorized collaborators
+	Lockboxes        []crypto.UserShareLockbox `json:"lockboxes,omitempty"`     // Post-quantum encrypted share slots
 	MerkleRoot       string               `json:"merkle_root,omitempty"`        // Cryptographic audit root
 	ReplicationPolicy string              `json:"replication_policy,omitempty"` // "local", "replicated_2", "distributed", "custom"
 	TargetReplicas   int                  `json:"target_replicas,omitempty"`    // Desired replica count (e.g. 2)
@@ -76,9 +77,12 @@ type Store struct {
 	chunksDir       string
 	recordsDir      string
 	indexFile       string
-	records         map[string]*Record // data_id -> Record
-	maxDiskBytes    int64
-	contractChecker ContractCheckerFunc
+	records                map[string]*Record // data_id -> Record
+	customCollections      map[string]bool    // registered collections
+	customCollectionFields map[string][]CollectionField // collection -> custom schema fields
+	schemaFile             string
+	maxDiskBytes           int64
+	contractChecker        ContractCheckerFunc
 }
 
 // NewStore initializes a local database store.
@@ -94,13 +98,18 @@ func NewStore(baseDir string) (*Store, error) {
 	}
 
 	s := &Store{
-		baseDir:      baseDir,
-		chunksDir:    chunksDir,
-		recordsDir:   recordsDir,
-		indexFile:    filepath.Join(baseDir, "index.json"),
-		records:      make(map[string]*Record),
-		maxDiskBytes: 50 * 1024 * 1024 * 1024, // 50 GB default limit
+		baseDir:                baseDir,
+		chunksDir:              chunksDir,
+		recordsDir:             recordsDir,
+		indexFile:              filepath.Join(baseDir, "index.json"),
+		schemaFile:             filepath.Join(baseDir, "collections_schema.json"),
+		records:                make(map[string]*Record),
+		customCollections:      make(map[string]bool),
+		customCollectionFields: make(map[string][]CollectionField),
+		maxDiskBytes:           50 * 1024 * 1024 * 1024, // 50 GB default limit
 	}
+
+	s.loadSchemaFile()
 
 	if err := s.loadIndex(); err != nil {
 		return nil, fmt.Errorf("failed to load database index: %w", err)
@@ -371,12 +380,18 @@ func (s *Store) UpdateRecord(dataID string, updaterPubKey string, signature stri
 	}
 
 	// Verify update permission: must be owner or have PermEdit in ACL
-	allowed := (rec.UserPubAddress == "" || updaterPubKey == "" || rec.UserPubAddress == updaterPubKey)
-	if !allowed {
-		for _, acl := range rec.ACL {
-			if acl.UserPubKey == updaterPubKey && acl.Permission == PermEdit {
-				allowed = true
-				break
+	allowed := false
+	if rec.UserPubAddress == "" {
+		allowed = true // Unowned record
+	} else if updaterPubKey != "" {
+		if rec.UserPubAddress == updaterPubKey {
+			allowed = true
+		} else {
+			for _, acl := range rec.ACL {
+				if acl.UserPubKey == updaterPubKey && acl.Permission == PermEdit {
+					allowed = true
+					break
+				}
 			}
 		}
 	}
@@ -384,15 +399,27 @@ func (s *Store) UpdateRecord(dataID string, updaterPubKey string, signature stri
 		return nil, errors.New("unauthorized: caller does not possess edit rights")
 	}
 
-	// Validate signature if full ed25519 hex provided
-	if signature != "" && len(updaterPubKey) == 64 && len(signature) == 128 {
-		toSign1 := []byte(fmt.Sprintf("%s:%d:%s", dataID, rec.Version+1, newText))
-		toSign2 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version+1))
-		toSign3 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version))
-		if !crypto.VerifySignature(toSign1, updaterPubKey, signature) &&
-			!crypto.VerifySignature(toSign2, updaterPubKey, signature) &&
-			!crypto.VerifySignature(toSign3, updaterPubKey, signature) {
-			return nil, errors.New("invalid signature for record update")
+	// Enforce signature verification if record has an owner or if signature is supplied
+	if rec.UserPubAddress != "" || signature != "" {
+		if signature != "" {
+			toSign1 := []byte(fmt.Sprintf("%s:%d:%s", dataID, rec.Version+1, newText))
+			toSign2 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version+1))
+			toSign3 := []byte(fmt.Sprintf("%s%s%d", dataID, newText, rec.Version))
+			toSign4 := []byte(fmt.Sprintf("%s:%d", dataID, rec.Version+1))
+			toSign5 := []byte(fmt.Sprintf("%s:%s", dataID, newText))
+
+			valid := crypto.VerifyHybridSignature(toSign1, updaterPubKey, signature) ||
+				crypto.VerifyHybridSignature(toSign2, updaterPubKey, signature) ||
+				crypto.VerifyHybridSignature(toSign3, updaterPubKey, signature) ||
+				crypto.VerifyHybridSignature(toSign4, updaterPubKey, signature) ||
+				crypto.VerifyHybridSignature(toSign5, updaterPubKey, signature)
+
+			if !valid {
+				return nil, errors.New("unauthorized: invalid signature for record update")
+			}
+		} else if len(updaterPubKey) == 64 || len(updaterPubKey) == 3904 {
+			// Cryptographic key requires signature
+			return nil, errors.New("unauthorized: missing cryptographic signature for record update")
 		}
 	}
 
@@ -462,18 +489,35 @@ func (s *Store) DeleteRecord(dataID string, callerPubKey string, signature strin
 		return fmt.Errorf("record %q not found", dataID)
 	}
 
-	// Only owner or editor can delete
-	allowed := (rec.UserPubAddress == "" || callerPubKey == "" || rec.UserPubAddress == callerPubKey)
-	if !allowed {
-		for _, acl := range rec.ACL {
-			if acl.UserPubKey == callerPubKey && acl.Permission == PermEdit {
-				allowed = true
-				break
+	if rec.UserPubAddress != "" {
+		if callerPubKey == "" {
+			return errors.New("unauthorized: missing caller public key for deletion")
+		}
+
+		// Only owner or editor can delete
+		allowed := (rec.UserPubAddress == callerPubKey)
+		if !allowed {
+			for _, acl := range rec.ACL {
+				if acl.UserPubKey == callerPubKey && acl.Permission == PermEdit {
+					allowed = true
+					break
+				}
 			}
 		}
-	}
-	if !allowed {
-		return errors.New("unauthorized: caller cannot delete this record")
+		if !allowed {
+			return errors.New("unauthorized: caller cannot delete this record")
+		}
+
+		if signature != "" {
+			toSign1 := []byte(fmt.Sprintf("delete:%s", dataID))
+			toSign2 := []byte(fmt.Sprintf("%s:delete", dataID))
+			toSign3 := []byte(dataID)
+			if !crypto.VerifyHybridSignature(toSign1, callerPubKey, signature) &&
+				!crypto.VerifyHybridSignature(toSign2, callerPubKey, signature) &&
+				!crypto.VerifyHybridSignature(toSign3, callerPubKey, signature) {
+				return errors.New("unauthorized: invalid signature for record deletion")
+			}
+		}
 	}
 
 	path := filepath.Join(s.recordsDir, dataID+".json")
@@ -514,6 +558,164 @@ func (s *Store) AddCollaborator(dataID string, ownerPubKey string, entry AccessC
 	return s.saveRecordDisk(rec)
 }
 
+// AddCollaboratorSigned adds or updates Google Drive-style permissions with owner signature verification.
+func (s *Store) AddCollaboratorSigned(dataID string, ownerPubKey string, ownerSignature string, entry AccessControlEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rec, exists := s.records[dataID]
+	if !exists {
+		return fmt.Errorf("record %q not found", dataID)
+	}
+
+	if rec.UserPubAddress != "" {
+		if rec.UserPubAddress != ownerPubKey {
+			return errors.New("unauthorized: only data owner can manage collaborators")
+		}
+		if ownerSignature != "" {
+			toSign1 := []byte(fmt.Sprintf("add_collaborator:%s:%s:%s", dataID, entry.UserPubKey, entry.Permission))
+			toSign2 := []byte(fmt.Sprintf("%s:%s", dataID, entry.UserPubKey))
+			if !crypto.VerifyHybridSignature(toSign1, ownerPubKey, ownerSignature) &&
+				!crypto.VerifyHybridSignature(toSign2, ownerPubKey, ownerSignature) {
+				return errors.New("unauthorized: invalid signature for adding collaborator")
+			}
+		}
+	}
+
+	entry.AddedAt = time.Now().UTC()
+	found := false
+	for i, existing := range rec.ACL {
+		if existing.UserPubKey == entry.UserPubKey {
+			rec.ACL[i] = entry
+			found = true
+			break
+		}
+	}
+	if !found {
+		rec.ACL = append(rec.ACL, entry)
+	}
+
+	return s.saveRecordDisk(rec)
+}
+
+// RevokeCollaborator removes a collaborator from the ACL.
+func (s *Store) RevokeCollaborator(dataID string, ownerPubKey string, collaboratorPubKey string) error {
+	return s.RevokeCollaboratorSigned(dataID, ownerPubKey, "", collaboratorPubKey)
+}
+
+// RevokeCollaboratorSigned removes a collaborator from the ACL with owner signature verification.
+func (s *Store) RevokeCollaboratorSigned(dataID string, ownerPubKey string, ownerSignature string, collaboratorPubKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rec, exists := s.records[dataID]
+	if !exists {
+		return fmt.Errorf("record %q not found", dataID)
+	}
+
+	if rec.UserPubAddress != "" {
+		if rec.UserPubAddress != ownerPubKey {
+			return errors.New("unauthorized: only data owner can revoke collaborators")
+		}
+		if ownerSignature != "" {
+			toSign1 := []byte(fmt.Sprintf("revoke_collaborator:%s:%s", dataID, collaboratorPubKey))
+			toSign2 := []byte(fmt.Sprintf("%s:revoke:%s", dataID, collaboratorPubKey))
+			toSign3 := []byte(fmt.Sprintf("%s:%s", dataID, collaboratorPubKey))
+			if !crypto.VerifyHybridSignature(toSign1, ownerPubKey, ownerSignature) &&
+				!crypto.VerifyHybridSignature(toSign2, ownerPubKey, ownerSignature) &&
+				!crypto.VerifyHybridSignature(toSign3, ownerPubKey, ownerSignature) {
+				return errors.New("unauthorized: invalid signature for revoking collaborator")
+			}
+		}
+	}
+
+	var newACL []AccessControlEntry
+	for _, entry := range rec.ACL {
+		if entry.UserPubKey != collaboratorPubKey {
+			newACL = append(newACL, entry)
+		}
+	}
+	rec.ACL = newACL
+	return s.saveRecordDisk(rec)
+}
+
+// PutShareLockbox stores an encrypted post-quantum share slot for a collaborator.
+func (s *Store) PutShareLockbox(dataID string, box crypto.UserShareLockbox) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rec, exists := s.records[dataID]
+	if !exists {
+		return fmt.Errorf("record %q not found", dataID)
+	}
+
+	updated := false
+	for i, existing := range rec.Lockboxes {
+		if existing.FriendID == box.FriendID && existing.ShareIndex == box.ShareIndex {
+			rec.Lockboxes[i] = box
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		rec.Lockboxes = append(rec.Lockboxes, box)
+	}
+
+	return s.saveRecordDisk(rec)
+}
+
+// GetShareLockbox retrieves a specific collaborator's lockbox on this node.
+func (s *Store) GetShareLockbox(dataID string, friendID string) (*crypto.UserShareLockbox, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rec, exists := s.records[dataID]
+	if !exists {
+		return nil, fmt.Errorf("record %q not found", dataID)
+	}
+
+	for _, box := range rec.Lockboxes {
+		if box.FriendID == friendID || box.FriendMLKEMPubKey == friendID || box.FriendSignPubKey == friendID {
+			return &box, nil
+		}
+	}
+	return nil, fmt.Errorf("lockbox not found for friend %q", friendID)
+}
+
+// PurgeShareLockbox purges the collaborator's share slot from this node (used for threshold revocation).
+func (s *Store) PurgeShareLockbox(dataID string, ownerPubKey string, ownerSig string, friendID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rec, exists := s.records[dataID]
+	if !exists {
+		return fmt.Errorf("record %q not found", dataID)
+	}
+
+	if rec.UserPubAddress != "" {
+		if rec.UserPubAddress != ownerPubKey {
+			return errors.New("unauthorized: only data owner can purge share lockboxes")
+		}
+		if ownerSig != "" {
+			toSign1 := []byte(fmt.Sprintf("purge_share:%s:%s", dataID, friendID))
+			toSign2 := []byte(fmt.Sprintf("%s:%s", dataID, friendID))
+			if !crypto.VerifyHybridSignature(toSign1, ownerPubKey, ownerSig) &&
+				!crypto.VerifyHybridSignature(toSign2, ownerPubKey, ownerSig) {
+				return errors.New("unauthorized: invalid signature for purging share lockbox")
+			}
+		}
+	}
+
+	var remaining []crypto.UserShareLockbox
+	for _, box := range rec.Lockboxes {
+		if box.FriendID != friendID && box.FriendMLKEMPubKey != friendID && box.FriendSignPubKey != friendID {
+			remaining = append(remaining, box)
+		}
+	}
+	rec.Lockboxes = remaining
+	return s.saveRecordDisk(rec)
+}
+
 // ListRecords lists records optionally filtered by collection.
 func (s *Store) ListRecords(collection string, limit, offset int) ([]*Record, int) {
 	s.mu.RLock()
@@ -541,6 +743,257 @@ func (s *Store) ListRecords(collection string, limit, offset int) ([]*Record, in
 	}
 
 	return matched[offset:end], total
+}
+
+// CollectionField defines a schema field within a collection.
+type CollectionField struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"` // "text", "number", "file", "json", "date", "bool"
+	Required bool   `json:"required"`
+}
+
+// CollectionInfo provides PocketBase-style metadata for collections and their fields.
+type CollectionInfo struct {
+	Name        string            `json:"name"`
+	RecordCount int               `json:"record_count"`
+	Fields      []CollectionField `json:"fields"`
+	System      bool              `json:"system"`
+	UpdatedAt   time.Time         `json:"updated_at"`
+}
+
+// ListCollections returns metadata for all collections, including their record counts and schema fields.
+func (s *Store) ListCollections() []CollectionInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	standardFields := []CollectionField{
+		{Name: "data_id", Type: "text", Required: true},
+		{Name: "version", Type: "number", Required: true},
+		{Name: "text", Type: "text", Required: false},
+		{Name: "file_name", Type: "file", Required: false},
+		{Name: "picture_name", Type: "file", Required: false},
+		{Name: "acl", Type: "json", Required: false},
+		{Name: "lockboxes", Type: "json", Required: false},
+		{Name: "merkle_root", Type: "text", Required: false},
+		{Name: "updated_at", Type: "date", Required: true},
+	}
+
+	colMap := make(map[string]*CollectionInfo)
+
+	// Ensure standard default collections are always present
+	defaults := []string{"files", "notes", "default"}
+	for _, name := range defaults {
+		colMap[name] = &CollectionInfo{
+			Name:        name,
+			RecordCount: 0,
+			Fields:      standardFields,
+			System:      name == "default",
+			UpdatedAt:   time.Now().UTC(),
+		}
+	}
+
+	// Helper to merge standard and custom fields
+	mergeFields := func(colName string) []CollectionField {
+		res := append([]CollectionField{}, standardFields...)
+		custom := s.customCollectionFields[colName]
+		fieldSet := make(map[string]bool)
+		for _, f := range standardFields {
+			fieldSet[strings.ToLower(f.Name)] = true
+		}
+		for _, f := range custom {
+			if !fieldSet[strings.ToLower(f.Name)] {
+				fieldSet[strings.ToLower(f.Name)] = true
+				res = append(res, f)
+			}
+		}
+		return res
+	}
+
+	for _, name := range defaults {
+		colMap[name].Fields = mergeFields(name)
+	}
+
+	// Register any custom collections created by user / SDK
+	for name := range s.customCollections {
+		if _, exists := colMap[name]; !exists {
+			colMap[name] = &CollectionInfo{
+				Name:        name,
+				RecordCount: 0,
+				Fields:      mergeFields(name),
+				System:      false,
+				UpdatedAt:   time.Now().UTC(),
+			}
+		} else {
+			colMap[name].Fields = mergeFields(name)
+		}
+	}
+
+	// Count records and collect latest updated timestamps
+	for _, rec := range s.records {
+		name := rec.Collection
+		if name == "" {
+			name = "default"
+		}
+
+		info, exists := colMap[name]
+		if !exists {
+			info = &CollectionInfo{
+				Name:        name,
+				RecordCount: 0,
+				Fields:      mergeFields(name),
+				System:      false,
+				UpdatedAt:   rec.UpdatedAt,
+			}
+			colMap[name] = info
+		}
+
+		info.RecordCount++
+		if rec.UpdatedAt.After(info.UpdatedAt) {
+			info.UpdatedAt = rec.UpdatedAt
+		}
+	}
+
+	var result []CollectionInfo
+	for _, info := range colMap {
+		result = append(result, *info)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+
+	return result
+}
+
+// CreateCollection registers a new user collection.
+func (s *Store) CreateCollection(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cleanName := strings.TrimSpace(strings.ToLower(name))
+	if cleanName == "" {
+		return errors.New("collection name cannot be empty")
+	}
+
+	s.customCollections[cleanName] = true
+	_ = s.saveSchemaFileLocked()
+	return nil
+}
+
+// EnsureCollection idempotently registers a collection and merges schema fields (used by SDK app handshakes).
+func (s *Store) EnsureCollection(name string, fields []CollectionField) (*CollectionInfo, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cleanName := strings.TrimSpace(strings.ToLower(name))
+	if cleanName == "" {
+		return nil, errors.New("collection name cannot be empty")
+	}
+
+	s.customCollections[cleanName] = true
+
+	// Merge incoming custom fields
+	existing := s.customCollectionFields[cleanName]
+	fieldMap := make(map[string]CollectionField)
+	for _, f := range existing {
+		fieldMap[strings.ToLower(f.Name)] = f
+	}
+
+	for _, f := range fields {
+		k := strings.ToLower(strings.TrimSpace(f.Name))
+		if k == "" {
+			continue
+		}
+		if _, exists := fieldMap[k]; !exists {
+			fieldMap[k] = f
+			existing = append(existing, f)
+		}
+	}
+	s.customCollectionFields[cleanName] = existing
+	_ = s.saveSchemaFileLocked()
+
+	// Return updated CollectionInfo
+	recCount := 0
+	for _, r := range s.records {
+		if strings.EqualFold(r.Collection, cleanName) {
+			recCount++
+		}
+	}
+
+	standardFields := []CollectionField{
+		{Name: "data_id", Type: "text", Required: true},
+		{Name: "version", Type: "number", Required: true},
+		{Name: "text", Type: "text", Required: false},
+		{Name: "file_name", Type: "file", Required: false},
+		{Name: "picture_name", Type: "file", Required: false},
+		{Name: "acl", Type: "json", Required: false},
+		{Name: "lockboxes", Type: "json", Required: false},
+		{Name: "merkle_root", Type: "text", Required: false},
+		{Name: "updated_at", Type: "date", Required: true},
+	}
+	fieldSet := make(map[string]bool)
+	fullFields := append([]CollectionField{}, standardFields...)
+	for _, f := range standardFields {
+		fieldSet[strings.ToLower(f.Name)] = true
+	}
+	for _, f := range existing {
+		if !fieldSet[strings.ToLower(f.Name)] {
+			fieldSet[strings.ToLower(f.Name)] = true
+			fullFields = append(fullFields, f)
+		}
+	}
+
+	return &CollectionInfo{
+		Name:        cleanName,
+		RecordCount: recCount,
+		Fields:      fullFields,
+		System:      false,
+		UpdatedAt:   time.Now().UTC(),
+	}, nil
+}
+
+func (s *Store) loadSchemaFile() {
+	if s.schemaFile == "" {
+		return
+	}
+	data, err := os.ReadFile(s.schemaFile)
+	if err != nil {
+		return
+	}
+	var stored struct {
+		Collections []string                     `json:"collections"`
+		Fields      map[string][]CollectionField `json:"fields"`
+	}
+	if err := json.Unmarshal(data, &stored); err == nil {
+		for _, name := range stored.Collections {
+			s.customCollections[name] = true
+		}
+		if stored.Fields != nil {
+			s.customCollectionFields = stored.Fields
+		}
+	}
+}
+
+func (s *Store) saveSchemaFileLocked() error {
+	if s.schemaFile == "" {
+		return nil
+	}
+	var names []string
+	for n := range s.customCollections {
+		names = append(names, n)
+	}
+	stored := struct {
+		Collections []string                     `json:"collections"`
+		Fields      map[string][]CollectionField `json:"fields"`
+	}{
+		Collections: names,
+		Fields:      s.customCollectionFields,
+	}
+	data, err := json.MarshalIndent(stored, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.schemaFile, data, 0644)
 }
 
 func (s *Store) saveRecordDisk(rec *Record) error {

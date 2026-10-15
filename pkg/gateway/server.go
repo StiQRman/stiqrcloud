@@ -158,6 +158,7 @@ func (s *Server) setupRoutes() {
 	// Records & Collections API
 	s.mux.HandleFunc("/api/records", s.handleRecordsRoot)
 	s.mux.HandleFunc("/api/records/", s.handleRecordDetail)
+	s.mux.HandleFunc("/api/collections/ensure", s.handleCollectionsEnsure)
 	s.mux.HandleFunc("/api/collections/", s.handleCollections)
 	s.mux.HandleFunc("/api/files/", s.handleFiles)
 
@@ -185,6 +186,7 @@ func (s *Server) setupRoutes() {
 	// Escrow & Storage Monetization API (Admin - Local Only)
 	s.mux.HandleFunc("/api/escrow/policy", s.localOnly(s.handleEscrowPolicy))
 	s.mux.HandleFunc("/api/escrow/whitelist", s.localOnly(s.handleEscrowWhitelist))
+	s.mux.HandleFunc("/api/escrow/blacklist", s.localOnly(s.handleEscrowBlacklist))
 	s.mux.HandleFunc("/api/storage/quota", s.localOnly(s.handleStorageQuota))
 
 	// Auditing Trigger API (Admin - Local Only)
@@ -213,6 +215,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/dashboard/stats", s.localOnly(dash.HandleStatsJSON))
 	s.mux.HandleFunc("/api/dashboard/version", s.localOnly(dash.HandleVersionJSON))
 	s.mux.HandleFunc("/api/dashboard/records", s.localOnly(dash.HandleRecordsJSON))
+	s.mux.HandleFunc("/api/dashboard/collections", s.localOnly(dash.HandleCollectionsJSON))
 
 	// Reticulum Peer-to-Peer Packet API
 	s.mux.HandleFunc("/api/reticulum/send", s.handleReticulumSend)
@@ -925,6 +928,11 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 		collection = "default"
 	}
 
+	if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(userPubKey) {
+		http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+		return
+	}
+
 	rec := &storage.Record{
 		DataID:            dataID,
 		Collection:        collection,
@@ -1013,30 +1021,123 @@ func (s *Server) handleRecordDetail(w http.ResponseWriter, r *http.Request) {
 			return
 
 		case "collaborators":
-			if r.Method != http.MethodPost {
+			switch r.Method {
+			case http.MethodPost:
+				var body struct {
+					OwnerPubKey    string                     `json:"owner_pub_key"`
+					OwnerSignature string                     `json:"signature"`
+					Collaborator   storage.AccessControlEntry `json:"collaborator"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					http.Error(w, "invalid request body", http.StatusBadRequest)
+					return
+				}
+				if body.OwnerPubKey == "" {
+					body.OwnerPubKey = r.Header.Get("X-User-PubKey")
+				}
+				if body.OwnerSignature == "" {
+					body.OwnerSignature = r.Header.Get("X-User-Signature")
+				}
+
+				if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(body.OwnerPubKey) {
+					http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+					return
+				}
+
+				if err := s.store.AddCollaboratorSigned(dataID, body.OwnerPubKey, body.OwnerSignature, body.Collaborator); err != nil {
+					http.Error(w, err.Error(), http.StatusForbidden)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "collaborator added"})
+				return
+
+			case http.MethodDelete:
+				var body struct {
+					OwnerPubKey        string `json:"owner_pub_key"`
+					OwnerSignature     string `json:"signature"`
+					CollaboratorPubKey string `json:"collaborator_pub_key"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if body.OwnerPubKey == "" {
+					body.OwnerPubKey = r.Header.Get("X-User-PubKey")
+				}
+				if body.OwnerSignature == "" {
+					body.OwnerSignature = r.Header.Get("X-User-Signature")
+				}
+				if body.CollaboratorPubKey == "" {
+					body.CollaboratorPubKey = r.URL.Query().Get("collaborator_pub_key")
+				}
+
+				if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(body.OwnerPubKey) {
+					http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+					return
+				}
+
+				if err := s.store.RevokeCollaboratorSigned(dataID, body.OwnerPubKey, body.OwnerSignature, body.CollaboratorPubKey); err != nil {
+					http.Error(w, err.Error(), http.StatusForbidden)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "collaborator revoked"})
+				return
+
+			default:
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			var entry storage.AccessControlEntry
-			var ownerPubKey string
-			var body struct {
-				OwnerPubKey string                     `json:"owner_pub_key"`
-				Collaborator storage.AccessControlEntry `json:"collaborator"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				http.Error(w, "invalid request body", http.StatusBadRequest)
-				return
-			}
-			entry = body.Collaborator
-			ownerPubKey = body.OwnerPubKey
 
-			if err := s.store.AddCollaborator(dataID, ownerPubKey, entry); err != nil {
-				http.Error(w, err.Error(), http.StatusForbidden)
+		case "lockbox":
+			switch r.Method {
+			case http.MethodPost:
+				var box crypto.UserShareLockbox
+				if err := json.NewDecoder(r.Body).Decode(&box); err != nil {
+					http.Error(w, "invalid lockbox payload", http.StatusBadRequest)
+					return
+				}
+				if s.escrowMgr != nil && (s.escrowMgr.IsBlacklisted(box.FriendID) || s.escrowMgr.IsBlacklisted(box.FriendMLKEMPubKey) || s.escrowMgr.IsBlacklisted(box.FriendSignPubKey)) {
+					http.Error(w, "Forbidden: friend public key or identity is blacklisted on this node", http.StatusForbidden)
+					return
+				}
+				if err := s.store.PutShareLockbox(dataID, box); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "lockbox saved"})
+				return
+
+			case http.MethodGet:
+				friendID := r.URL.Query().Get("friend_id")
+				box, err := s.store.GetShareLockbox(dataID, friendID)
+				if err != nil {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(box)
+				return
+
+			case http.MethodDelete:
+				ownerPubKey := r.Header.Get("X-User-PubKey")
+				sig := r.Header.Get("X-User-Signature")
+				friendID := r.URL.Query().Get("friend_id")
+				if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(ownerPubKey) {
+					http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+					return
+				}
+				if err := s.store.PurgeShareLockbox(dataID, ownerPubKey, sig, friendID); err != nil {
+					http.Error(w, err.Error(), http.StatusForbidden)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "lockbox purged"})
+				return
+
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]string{"status": "collaborator added"})
-			return
 		}
 	}
 
@@ -1072,9 +1173,25 @@ func (s *Server) handleRecordDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if body.UpdaterPubKey == "" {
+			body.UpdaterPubKey = r.Header.Get("X-User-PubKey")
+		}
+		if body.Signature == "" {
+			body.Signature = r.Header.Get("X-User-Signature")
+		}
+
+		if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(body.UpdaterPubKey) {
+			http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+			return
+		}
+
 		updated, err := s.store.UpdateRecord(dataID, body.UpdaterPubKey, body.Signature, body.Text, nil, nil)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			if strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
+				http.Error(w, err.Error(), http.StatusForbidden)
+			} else {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+			}
 			return
 		}
 		_ = s.replicateAndEngageQuorum(updated, nil, nil)
@@ -1085,6 +1202,10 @@ func (s *Server) handleRecordDetail(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		callerPubKey := r.Header.Get("X-User-PubKey")
 		sig := r.Header.Get("X-User-Signature")
+		if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(callerPubKey) {
+			http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+			return
+		}
 		if err := s.store.DeleteRecord(dataID, callerPubKey, sig); err != nil {
 			http.Error(w, err.Error(), http.StatusForbidden)
 			return
@@ -1203,6 +1324,17 @@ func (s *Server) handleCreatePBRecord(w http.ResponseWriter, r *http.Request, co
 		sig = sVal
 	} else if sVal, ok := rawBodyMap["owner_signature"].(string); ok {
 		sig = sVal
+	}
+
+	if userPubKey == "" {
+		userPubKey = r.Header.Get("X-User-PubKey")
+	}
+	if sig == "" {
+		sig = r.Header.Get("X-User-Signature")
+	}
+	if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(userPubKey) {
+		http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+		return
 	}
 
 	if text == "" {
@@ -1341,6 +1473,16 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 
 					updaterPubKey, _ := body["updater_pub_key"].(string)
 					sig, _ := body["signature"].(string)
+					if updaterPubKey == "" {
+						updaterPubKey = r.Header.Get("X-User-PubKey")
+					}
+					if sig == "" {
+						sig = r.Header.Get("X-User-Signature")
+					}
+					if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(updaterPubKey) {
+						http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+						return
+					}
 					text, _ := body["text"].(string)
 					if text == "" {
 						if c, ok := body["content"].(string); ok {
@@ -1353,7 +1495,11 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 
 					updated, err := s.store.UpdateRecord(recordID, updaterPubKey, sig, text, nil, nil)
 					if err != nil {
-						http.Error(w, err.Error(), http.StatusBadRequest)
+						if strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
+							http.Error(w, err.Error(), http.StatusForbidden)
+						} else {
+							http.Error(w, err.Error(), http.StatusBadRequest)
+						}
 						return
 					}
 					_ = s.replicateAndEngageQuorum(updated, nil, nil)
@@ -1362,7 +1508,16 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 					return
 
 				case http.MethodDelete:
-					_ = s.store.DeleteRecord(recordID, "", "")
+					callerPubKey := r.Header.Get("X-User-PubKey")
+					sig := r.Header.Get("X-User-Signature")
+					if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(callerPubKey) {
+						http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+						return
+					}
+					if err := s.store.DeleteRecord(recordID, callerPubKey, sig); err != nil {
+						http.Error(w, err.Error(), http.StatusForbidden)
+						return
+					}
 					w.Header().Set("Content-Type", "application/json")
 					_ = json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "id": recordID})
 					return
@@ -1455,6 +1610,7 @@ func (s *Server) handleEscrowPolicy(w http.ResponseWriter, r *http.Request) {
 			"free_for_all":        policy.FreeForAll,
 			"price_per_gb_month": policy.PricePerGBMonth,
 			"free_whitelist":      policy.FreeWhitelist,
+			"blacklist":           policy.Blacklist,
 			"max_bytes":           stats.MaxBytes,
 			"used_bytes":          stats.UsedBytes,
 			"active_bytes":        stats.ActiveBytes,
@@ -1467,6 +1623,7 @@ func (s *Server) handleEscrowPolicy(w http.ResponseWriter, r *http.Request) {
 			FreeForAll      *bool    `json:"free_for_all"`
 			PricePerGBMonth *int64   `json:"price_per_gb_month"`
 			FreeWhitelist   []string `json:"free_whitelist"`
+			Blacklist       []string `json:"blacklist"`
 			MaxBytes        *int64   `json:"max_bytes"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1483,6 +1640,9 @@ func (s *Server) handleEscrowPolicy(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.FreeWhitelist != nil {
 			current.FreeWhitelist = req.FreeWhitelist
+		}
+		if req.Blacklist != nil {
+			current.Blacklist = req.Blacklist
 		}
 		_ = s.escrowMgr.UpdatePolicy(current)
 
@@ -1501,30 +1661,121 @@ func (s *Server) handleEscrowPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleEscrowWhitelist(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.escrowMgr == nil {
+		http.Error(w, "escrow manager disabled", http.StatusInternalServerError)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":         "ok",
+			"free_whitelist": s.escrowMgr.GetPolicy().FreeWhitelist,
+		})
+
+	case http.MethodPost:
+		var req struct {
+			Action  string `json:"action"` // "add" or "remove"
+			Address string `json:"address"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		if strings.EqualFold(req.Action, "remove") {
+			_ = s.escrowMgr.RemoveWhitelist(req.Address)
+		} else {
+			_ = s.escrowMgr.AddWhitelist(req.Address)
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":         "ok",
+			"free_whitelist": s.escrowMgr.GetPolicy().FreeWhitelist,
+		})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleEscrowBlacklist(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.escrowMgr == nil {
+		http.Error(w, "escrow manager disabled", http.StatusInternalServerError)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":    "ok",
+			"blacklist": s.escrowMgr.GetPolicy().Blacklist,
+		})
+
+	case http.MethodPost:
+		var req struct {
+			Action  string `json:"action"` // "add" or "remove"
+			Address string `json:"address"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		if strings.EqualFold(req.Action, "remove") {
+			_ = s.escrowMgr.RemoveBlacklist(req.Address)
+		} else {
+			_ = s.escrowMgr.AddBlacklist(req.Address)
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":    "ok",
+			"blacklist": s.escrowMgr.GetPolicy().Blacklist,
+		})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleCollectionsEnsure provides an idempotent handshake for apps using the SDK
+// to declare their collections and schema fields upon connecting to a node.
+func (s *Server) handleCollectionsEnsure(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	callerPubKey := r.Header.Get("X-User-PubKey")
+	if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(callerPubKey) {
+		http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+		return
+	}
+
 	var req struct {
-		Action  string `json:"action"` // "add" or "remove"
-		Address string `json:"address"`
+		Name   string                   `json:"name"`
+		Fields []storage.CollectionField `json:"fields"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if s.store == nil {
+		http.Error(w, "store not available", http.StatusInternalServerError)
+		return
+	}
+
+	info, err := s.store.EnsureCollection(req.Name, req.Fields)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if strings.EqualFold(req.Action, "remove") {
-		_ = s.escrowMgr.RemoveWhitelist(req.Address)
-	} else {
-		_ = s.escrowMgr.AddWhitelist(req.Address)
-	}
-
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":         "ok",
-		"free_whitelist": s.escrowMgr.GetPolicy().FreeWhitelist,
-	})
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(info)
 }
 
 func (s *Server) handleStorageQuota(w http.ResponseWriter, r *http.Request) {
@@ -1587,6 +1838,11 @@ func (s *Server) handleSDKStore(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json payload", http.StatusBadRequest)
+		return
+	}
+
+	if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(body.OwnerPubKey) {
+		http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
 		return
 	}
 
@@ -1673,6 +1929,11 @@ func (s *Server) handleSDKEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(body.OwnerPubKey) {
+		http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+		return
+	}
+
 	updated, err := s.store.UpdateRecord(dataID, body.OwnerPubKey, body.Signature, body.Content, nil, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1708,6 +1969,11 @@ func (s *Server) handleSDKDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(body.OwnerPubKey) {
+		http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
+		return
+	}
 
 	err := s.store.DeleteRecord(dataID, body.OwnerPubKey, body.Signature)
 	if err != nil {

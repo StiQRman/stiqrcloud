@@ -68,6 +68,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/dashboard/stats", s.HandleStatsJSON)
 	mux.HandleFunc("/api/dashboard/version", s.HandleVersionJSON)
 	mux.HandleFunc("/api/dashboard/records", s.HandleRecordsJSON)
+	mux.HandleFunc("/api/dashboard/collections", s.HandleCollectionsJSON)
 }
 
 func (s *Server) HandleDashboardHTML(w http.ResponseWriter, r *http.Request) {
@@ -146,9 +147,42 @@ func (s *Server) HandleVersionJSON(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) HandleRecordsJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	records, total := s.store.ListRecords("", 50, 0)
+	col := r.URL.Query().Get("collection")
+	records, total := s.store.ListRecords(col, 100, 0)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"records": records,
-		"total":   total,
+		"collection": col,
+		"records":    records,
+		"total":      total,
 	})
+}
+
+func (s *Server) HandleCollectionsJSON(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method {
+	case http.MethodGet:
+		collections := s.store.ListCollections()
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"collections": collections,
+		})
+
+	case http.MethodPost:
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+			http.Error(w, "invalid collection name", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.CreateCollection(body.Name); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "created",
+			"name":   body.Name,
+		})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
