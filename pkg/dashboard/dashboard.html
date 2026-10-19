@@ -1189,9 +1189,12 @@
         const safeDataID = escapeHTML(r.data_id || '');
         const shortID = r.data_id ? (r.data_id.length > 22 ? r.data_id.substring(0, 18) + '...' : r.data_id) : '-';
         const safeShortID = escapeHTML(shortID);
-        const fileDisplay = r.file_name 
-          ? `<a href="/api/records/${encodeURIComponent(r.data_id)}/file" target="_blank" style="color:var(--accent);text-decoration:none;">📎 ${escapeHTML(r.file_name)}</a>` 
-          : '<span style="color:var(--text-muted);">-</span>';
+        let fileDisplay = '<span style="color:var(--text-muted);">-</span>';
+        if (r.file_name) {
+          fileDisplay = `<a href="/api/records/${encodeURIComponent(r.data_id)}/file" target="_blank" style="color:var(--accent);text-decoration:none;">📎 ${escapeHTML(r.file_name)}</a>`;
+        } else if (r.picture_name) {
+          fileDisplay = `<a href="/api/records/${encodeURIComponent(r.data_id)}/picture" target="_blank" style="color:var(--accent);text-decoration:none;">🖼️ ${escapeHTML(r.picture_name)}</a>`;
+        }
         
         const lockboxBadges = (r.lockboxes && r.lockboxes.length > 0)
           ? `<span class="badge badge-purple">🔒 2-of-3 (${r.lockboxes.length} shares)</span>`
@@ -1231,7 +1234,8 @@
       const filtered = currentRecords.filter(r => 
         (r.data_id && r.data_id.toLowerCase().includes(q)) ||
         (r.text && r.text.toLowerCase().includes(q)) ||
-        (r.file_name && r.file_name.toLowerCase().includes(q))
+        (r.file_name && r.file_name.toLowerCase().includes(q)) ||
+        (r.picture_name && r.picture_name.toLowerCase().includes(q))
       );
       renderRecordsTable(filtered);
     }
@@ -1251,6 +1255,10 @@
         fileRow.style.display = 'block';
         document.getElementById('detail-filename').textContent = activeRecord.file_name;
         document.getElementById('detail-file-download').href = `/api/records/${encodeURIComponent(activeRecord.data_id)}/file`;
+      } else if (activeRecord.picture_name) {
+        fileRow.style.display = 'block';
+        document.getElementById('detail-filename').textContent = activeRecord.picture_name;
+        document.getElementById('detail-file-download').href = `/api/records/${encodeURIComponent(activeRecord.data_id)}/picture`;
       } else {
         fileRow.style.display = 'none';
       }
@@ -1293,20 +1301,29 @@
 
     function renderModalChunks() {
       const tbody = document.getElementById('detail-chunks-tbody');
-      if (!activeRecord.file_chunk_hash) {
+      const chunks = [];
+      if (activeRecord.file_chunk_hash) {
+        chunks.push({ type: 'File', hash: activeRecord.file_chunk_hash, name: activeRecord.file_name || 'Attached File' });
+      }
+      if (activeRecord.picture_chunk_hash) {
+        chunks.push({ type: 'Picture', hash: activeRecord.picture_chunk_hash, name: activeRecord.picture_name || 'Attached Picture' });
+      }
+      if (chunks.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:14px;">No attached chunks (Text only record).</td></tr>';
         return;
       }
-      const shortHash = activeRecord.file_chunk_hash ? (activeRecord.file_chunk_hash.length > 16 ? activeRecord.file_chunk_hash.substring(0, 16) + '...' : activeRecord.file_chunk_hash) : '-';
-      tbody.innerHTML = `
-        <tr>
-          <td>1</td>
-          <td class="mono" style="font-size:0.75rem;">${escapeHTML(shortHash)}</td>
-          <td class="mono" style="font-size:0.75rem;">AES-256-GCM (Protected)</td>
-          <td>${(activeRecord.total_bytes / 1024).toFixed(1)} KB</td>
-          <td><span class="badge badge-success">Stored</span></td>
-        </tr>
-      `;
+      tbody.innerHTML = chunks.map((c, idx) => {
+        const shortHash = c.hash ? (c.hash.length > 16 ? c.hash.substring(0, 16) + '...' : c.hash) : '-';
+        return `
+          <tr>
+            <td>${idx + 1}</td>
+            <td class="mono" style="font-size:0.75rem;">${escapeHTML(shortHash)}</td>
+            <td class="mono" style="font-size:0.75rem;">${escapeHTML(c.type)}: ${escapeHTML(c.name)}</td>
+            <td>${(activeRecord.total_bytes / 1024).toFixed(1)} KB</td>
+            <td><span class="badge badge-success">Stored</span></td>
+          </tr>
+        `;
+      }).join('');
     }
 
     function switchInspectorTab(tab) {

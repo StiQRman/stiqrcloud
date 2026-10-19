@@ -1253,7 +1253,7 @@ func (s *Server) handleRecordDetail(w http.ResponseWriter, r *http.Request) {
 		// If local node doesn't hold it, resolve across peer mesh!
 		var rec *storage.Record
 		var err error
-		if s.swarm != nil && !s.standalone {
+		if s.swarm != nil && !s.standalone && r.URL.Query().Get("local_only") != "1" {
 			rec, err = s.swarm.ResolveDataID(dataID)
 		} else {
 			rec, err = s.store.GetRecord(dataID)
@@ -1269,29 +1269,67 @@ func (s *Server) handleRecordDetail(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPatch, http.MethodPut:
 		// Update record while GUARANTEEING invariant DataID stays identical
-		var body struct {
-			UpdaterPubKey string `json:"updater_pub_key"`
-			Signature     string `json:"signature"`
-			Text          string `json:"text"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
-			return
+		var text, updaterPubKey, sig, fileName, picName string
+		var fileBytes, picBytes []byte
+
+		contentType := r.Header.Get("Content-Type")
+		if strings.HasPrefix(contentType, "multipart/form-data") {
+			_ = r.ParseMultipartForm(32 << 20)
+			text = r.FormValue("text")
+			if text == "" {
+				text = r.FormValue("content")
+			}
+			updaterPubKey = r.FormValue("updater_pub_key")
+			if updaterPubKey == "" {
+				updaterPubKey = r.FormValue("user_pub_address")
+			}
+			sig = r.FormValue("signature")
+			if file, header, err := r.FormFile("file"); err == nil {
+				fileBytes, _ = io.ReadAll(file)
+				fileName = header.Filename
+				_ = file.Close()
+			}
+			if pic, header, err := r.FormFile("picture"); err == nil {
+				picBytes, _ = io.ReadAll(pic)
+				picName = header.Filename
+				_ = pic.Close()
+			}
+		} else {
+			var body struct {
+				UpdaterPubKey  string `json:"updater_pub_key"`
+				UserPubAddress string `json:"user_pub_address"`
+				Signature      string `json:"signature"`
+				Text           string `json:"text"`
+				Content        string `json:"content"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "invalid request body", http.StatusBadRequest)
+				return
+			}
+			text = body.Text
+			if text == "" {
+				text = body.Content
+			}
+			updaterPubKey = body.UpdaterPubKey
+			if updaterPubKey == "" {
+				updaterPubKey = body.UserPubAddress
+			}
+			sig = body.Signature
 		}
 
-		if body.UpdaterPubKey == "" {
-			body.UpdaterPubKey = r.Header.Get("X-User-PubKey")
+		if updaterPubKey == "" {
+			updaterPubKey = r.Header.Get("X-User-PubKey")
 		}
-		if body.Signature == "" {
-			body.Signature = r.Header.Get("X-User-Signature")
+		if sig == "" {
+			sig = r.Header.Get("X-User-Signature")
 		}
 
-		if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(body.UpdaterPubKey) {
+		if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(updaterPubKey) {
 			http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
 			return
 		}
 
-		updated, err := s.store.UpdateRecord(dataID, body.UpdaterPubKey, body.Signature, body.Text, nil, nil)
+		updated, err := s.store.UpdateRecordWithNames(dataID, updaterPubKey, sig, text, fileBytes, fileName, picBytes, picName)
 		if err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
 				http.Error(w, err.Error(), http.StatusForbidden)
@@ -1300,7 +1338,7 @@ func (s *Server) handleRecordDetail(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		_ = s.replicateAndEngageQuorum(updated, nil, nil)
+		_ = s.replicateAndEngageQuorum(updated, fileBytes, picBytes)
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(updated)
@@ -1359,6 +1397,9 @@ func formatPBRecord(rec *storage.Record) map[string]interface{} {
 	if rec.FileName != "" {
 		res["file_name"] = rec.FileName
 		res["field"] = []string{rec.FileName}
+	}
+	if rec.PictureName != "" {
+		res["picture_name"] = rec.PictureName
 	}
 	if len(rec.StoragePeers) > 0 {
 		res["storage_peers"] = rec.StoragePeers
@@ -1426,6 +1467,8 @@ func (s *Server) handleCreatePBRecord(w http.ResponseWriter, r *http.Request, co
 	// Extract standard or custom fields
 	if id, ok := rawBodyMap["id"].(string); ok && id != "" {
 		dataID = id
+	} else if id, ok := rawBodyMap["data_id"].(string); ok && id != "" {
+		dataID = id
 	}
 	if pk, ok := rawBodyMap["user_pub_address"].(string); ok {
 		userPubKey = pk
@@ -1464,7 +1507,7 @@ func (s *Server) handleCreatePBRecord(w http.ResponseWriter, r *http.Request, co
 	if dataID != "" {
 		if existing, err := s.store.GetRecord(dataID); err == nil && existing != nil {
 			// Record already exists; perform idempotent update
-			record, err = s.store.UpdateRecord(dataID, userPubKey, sig, text, fileBytes, picBytes)
+			record, err = s.store.UpdateRecordWithNames(dataID, userPubKey, sig, text, fileBytes, fileName, picBytes, picName)
 			if err != nil {
 				http.Error(w, fmt.Sprintf("failed to update record: %v", err), http.StatusBadRequest)
 				return
@@ -1623,11 +1666,51 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 					return
 
 				case http.MethodPatch, http.MethodPut:
-					var body map[string]interface{}
-					_ = json.NewDecoder(r.Body).Decode(&body)
+					var text, updaterPubKey, sig, fileName, picName string
+					var fileBytes, picBytes []byte
 
-					updaterPubKey, _ := body["updater_pub_key"].(string)
-					sig, _ := body["signature"].(string)
+					contentType := r.Header.Get("Content-Type")
+					if strings.HasPrefix(contentType, "multipart/form-data") {
+						_ = r.ParseMultipartForm(32 << 20)
+						text = r.FormValue("text")
+						if text == "" {
+							text = r.FormValue("content")
+						}
+						updaterPubKey = r.FormValue("updater_pub_key")
+						if updaterPubKey == "" {
+							updaterPubKey = r.FormValue("user_pub_address")
+						}
+						sig = r.FormValue("signature")
+						if file, header, err := r.FormFile("file"); err == nil {
+							fileBytes, _ = io.ReadAll(file)
+							fileName = header.Filename
+							_ = file.Close()
+						}
+						if pic, header, err := r.FormFile("picture"); err == nil {
+							picBytes, _ = io.ReadAll(pic)
+							picName = header.Filename
+							_ = pic.Close()
+						}
+					} else {
+						var body map[string]interface{}
+						_ = json.NewDecoder(r.Body).Decode(&body)
+
+						updaterPubKey, _ = body["updater_pub_key"].(string)
+						if updaterPubKey == "" {
+							updaterPubKey, _ = body["user_pub_address"].(string)
+						}
+						sig, _ = body["signature"].(string)
+						text, _ = body["text"].(string)
+						if text == "" {
+							if c, ok := body["content"].(string); ok {
+								text = c
+							} else if len(body) > 0 {
+								b, _ := json.Marshal(body)
+								text = string(b)
+							}
+						}
+					}
+
 					if updaterPubKey == "" {
 						updaterPubKey = r.Header.Get("X-User-PubKey")
 					}
@@ -1638,17 +1721,8 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 						http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
 						return
 					}
-					text, _ := body["text"].(string)
-					if text == "" {
-						if c, ok := body["content"].(string); ok {
-							text = c
-						} else if len(body) > 0 {
-							b, _ := json.Marshal(body)
-							text = string(b)
-						}
-					}
 
-					updated, err := s.store.UpdateRecord(recordID, updaterPubKey, sig, text, nil, nil)
+					updated, err := s.store.UpdateRecordWithNames(recordID, updaterPubKey, sig, text, fileBytes, fileName, picBytes, picName)
 					if err != nil {
 						if strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
 							http.Error(w, err.Error(), http.StatusForbidden)
@@ -1657,7 +1731,7 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 						}
 						return
 					}
-					_ = s.replicateAndEngageQuorum(updated, nil, nil)
+					_ = s.replicateAndEngageQuorum(updated, fileBytes, picBytes)
 					w.Header().Set("Content-Type", "application/json")
 					_ = json.NewEncoder(w).Encode(formatPBRecord(updated))
 					return

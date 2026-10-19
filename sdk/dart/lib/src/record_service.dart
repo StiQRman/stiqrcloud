@@ -182,13 +182,17 @@ class RecordService {
     String id,
     Map<String, dynamic> data, {
     String? targetNodeUrl,
+    List<int>? fileBytes,
+    String? fileName,
+    List<int>? pictureBytes,
+    String? pictureName,
   }) async {
     final endpoint = await _client.nodeManager.resolveEndpoint(targetNodeUrl);
     final uri = Uri.parse(
       '$endpoint/api/collections/${Uri.encodeComponent(collectionName)}/records/${Uri.encodeComponent(id)}',
     );
 
-    final headers = <String, String>{'Content-Type': 'application/json'};
+    final headers = <String, String>{};
     final body = Map<String, dynamic>.from(data);
 
     final pubAddr = await _client.publicAddress;
@@ -210,14 +214,46 @@ class RecordService {
       }
     }
 
-    final resp = await _client.httpClient.patch(
-      uri,
-      headers: headers,
-      body: jsonEncode(body),
-    );
-    _client.checkResponse(resp, 'collection.update');
-    final resMap = jsonDecode(resp.body) as Map<String, dynamic>;
-    return RecordModel.fromJson(resMap);
+    if (fileBytes != null || pictureBytes != null) {
+      final req = http.MultipartRequest('PATCH', uri);
+      req.headers.addAll(headers);
+      for (final entry in body.entries) {
+        if (entry.value != null) {
+          req.fields[entry.key] = entry.value is String
+              ? entry.value as String
+              : jsonEncode(entry.value);
+        }
+      }
+      if (fileBytes != null) {
+        req.files.add(http.MultipartFile.fromBytes(
+          'file',
+          fileBytes,
+          filename: fileName ?? 'attachment.bin',
+        ));
+      }
+      if (pictureBytes != null) {
+        req.files.add(http.MultipartFile.fromBytes(
+          'picture',
+          pictureBytes,
+          filename: pictureName ?? 'picture.bin',
+        ));
+      }
+      final streamed = await _client.httpClient.send(req);
+      final resp = await http.Response.fromStream(streamed);
+      _client.checkResponse(resp, 'collection.update');
+      final resMap = jsonDecode(resp.body) as Map<String, dynamic>;
+      return RecordModel.fromJson(resMap);
+    } else {
+      headers['Content-Type'] = 'application/json';
+      final resp = await _client.httpClient.patch(
+        uri,
+        headers: headers,
+        body: jsonEncode(body),
+      );
+      _client.checkResponse(resp, 'collection.update');
+      final resMap = jsonDecode(resp.body) as Map<String, dynamic>;
+      return RecordModel.fromJson(resMap);
+    }
   }
 
   /// Deletes a record by ID

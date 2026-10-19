@@ -139,7 +139,7 @@ func (s *Swarm) announceToDiscovery() {
 	price := s.price
 	s.mu.RUnlock()
 
-	if discURL == "" {
+	if discURL == "" || strings.EqualFold(strings.TrimRight(discURL, "/"), strings.TrimRight(localAddr, "/")) {
 		return
 	}
 
@@ -812,18 +812,23 @@ func (s *Swarm) ResolveDataID(dataID string) (*storage.Record, error) {
 	s.mu.RUnlock()
 
 	for _, addr := range peerAddrs {
-		targetURL := fmt.Sprintf("%s/api/records/%s", addr, dataID)
+		if strings.EqualFold(strings.TrimRight(addr, "/"), strings.TrimRight(s.localAddr, "/")) {
+			continue
+		}
+		targetURL := fmt.Sprintf("%s/api/records/%s?local_only=1", strings.TrimRight(addr, "/"), dataID)
 		resp, err := s.httpClient.Get(targetURL)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			var rec storage.Record
+		if err == nil {
 			body, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
-			if err := json.Unmarshal(body, &rec); err == nil && rec.DataID == dataID {
-				// Cache locally if store present
-				if s.store != nil {
-					_, _ = s.store.UpsertReplicatedRecord(&rec, nil, nil)
+			if resp.StatusCode == http.StatusOK {
+				var rec storage.Record
+				if err := json.Unmarshal(body, &rec); err == nil && rec.DataID == dataID {
+					// Cache locally if store present
+					if s.store != nil {
+						_, _ = s.store.UpsertReplicatedRecord(&rec, nil, nil)
+					}
+					return &rec, nil
 				}
-				return &rec, nil
 			}
 		}
 	}

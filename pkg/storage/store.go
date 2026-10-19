@@ -347,7 +347,39 @@ func (s *Store) HasChunk(hash string) bool {
 	return err == nil && !fi.IsDir()
 }
 
-// CreateRecord persists a new record. If DataID is empty, it generates a permanent DataID.
+// syncACLFromText parses allowedUsers from JSON text payload and adds them to rec.ACL
+func syncACLFromText(rec *Record) {
+	if rec == nil || rec.Text == "" {
+		return
+	}
+	var data struct {
+		AllowedUsers      []string `json:"allowedUsers"`
+		AllowedUsersSnake []string `json:"allowed_users"`
+	}
+	if err := json.Unmarshal([]byte(rec.Text), &data); err == nil {
+		users := data.AllowedUsers
+		if len(users) == 0 {
+			users = data.AllowedUsersSnake
+		}
+		existing := make(map[string]bool)
+		for _, entry := range rec.ACL {
+			existing[entry.UserPubKey] = true
+		}
+		for _, u := range users {
+			u = strings.TrimSpace(u)
+			if u != "" && u != rec.UserPubAddress && !existing[u] {
+				rec.ACL = append(rec.ACL, AccessControlEntry{
+					UserPubKey: u,
+					Permission: PermEdit,
+					AddedAt:    time.Now().UTC(),
+				})
+				existing[u] = true
+			}
+		}
+	}
+}
+
+// CreateRecord persists a new record or performs an idempotent update if the record already exists.
 func (s *Store) CreateRecord(rec *Record, fileData []byte, picData []byte) (*Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -358,8 +390,76 @@ func (s *Store) CreateRecord(rec *Record, fileData []byte, picData []byte) (*Rec
 		if !isValidDataID(rec.DataID) {
 			return nil, fmt.Errorf("invalid data_id: %q contains forbidden characters or path traversal", rec.DataID)
 		}
-		if _, exists := s.records[rec.DataID]; exists {
-			return nil, fmt.Errorf("record with data_id %q already exists; use UpdateRecord", rec.DataID)
+		if existing, exists := s.records[rec.DataID]; exists {
+			// Idempotent upsert: if the record exists, update it if caller is authorized
+			if existing.UserPubAddress != "" && rec.UserPubAddress != "" && existing.UserPubAddress != rec.UserPubAddress {
+				hasPerm := false
+				for _, acl := range existing.ACL {
+					if acl.UserPubKey == rec.UserPubAddress && (acl.Permission == PermEdit || acl.Permission == "edit") {
+						hasPerm = true
+						break
+					}
+				}
+				if !hasPerm {
+					return nil, errors.New("unauthorized: caller does not possess rights to update this record")
+				}
+			}
+
+			existing.Version++
+			existing.UpdatedAt = time.Now().UTC()
+			existing.Text = rec.Text
+			if rec.UserPubAddress != "" && existing.UserPubAddress == "" {
+				existing.UserPubAddress = rec.UserPubAddress
+			}
+			if rec.OwnerSignature != "" {
+				existing.OwnerSignature = rec.OwnerSignature
+			}
+			if rec.ReplicationPolicy != "" {
+				existing.ReplicationPolicy = rec.ReplicationPolicy
+			}
+
+			var chunkHashes []string
+			if len(fileData) > 0 {
+				h, err := s.PutChunk(fileData)
+				if err != nil {
+					return nil, err
+				}
+				existing.FileChunkHash = h
+				existing.FileName = rec.FileName
+				chunkHashes = append(chunkHashes, h)
+			} else if existing.FileChunkHash != "" {
+				chunkHashes = append(chunkHashes, existing.FileChunkHash)
+			}
+
+			if len(picData) > 0 {
+				h, err := s.PutChunk(picData)
+				if err != nil {
+					return nil, err
+				}
+				existing.PictureChunkHash = h
+				existing.PictureName = rec.PictureName
+				chunkHashes = append(chunkHashes, h)
+			} else if existing.PictureChunkHash != "" {
+				chunkHashes = append(chunkHashes, existing.PictureChunkHash)
+			}
+
+			if existing.FileName == "" && existing.PictureName != "" {
+				existing.FileName = existing.PictureName
+			}
+
+			textHash := crypto.HashBytes([]byte(existing.Text))
+			chunkHashes = append(chunkHashes, textHash)
+			tree, err := crypto.BuildMerkleTree(chunkHashes)
+			if err == nil {
+				existing.MerkleRoot = tree.RootHex()
+			}
+			existing.TotalBytes = int64(len(existing.Text) + len(fileData) + len(picData))
+			syncACLFromText(existing)
+
+			if err := s.saveRecordDisk(existing); err != nil {
+				return nil, err
+			}
+			return existing, nil
 		}
 	}
 
@@ -391,6 +491,10 @@ func (s *Store) CreateRecord(rec *Record, fileData []byte, picData []byte) (*Rec
 		chunkHashes = append(chunkHashes, h)
 	}
 
+	if rec.FileName == "" && rec.PictureName != "" {
+		rec.FileName = rec.PictureName
+	}
+
 	// Also hash text into merkle calculation
 	textHash := crypto.HashBytes([]byte(rec.Text))
 	chunkHashes = append(chunkHashes, textHash)
@@ -417,6 +521,7 @@ func (s *Store) CreateRecord(rec *Record, fileData []byte, picData []byte) (*Rec
 	}
 
 	rec.TotalBytes = int64(len(rec.Text) + len(fileData) + len(picData))
+	syncACLFromText(rec)
 
 	if err := s.saveRecordDisk(rec); err != nil {
 		return nil, err
@@ -428,6 +533,11 @@ func (s *Store) CreateRecord(rec *Record, fileData []byte, picData []byte) (*Rec
 
 // UpdateRecord updates an existing record while guaranteeing that the DataID remains unchanged.
 func (s *Store) UpdateRecord(dataID string, updaterPubKey string, signature string, newText string, newFileData []byte, newPicData []byte) (*Record, error) {
+	return s.UpdateRecordWithNames(dataID, updaterPubKey, signature, newText, newFileData, "", newPicData, "")
+}
+
+// UpdateRecordWithNames updates an existing record with optional file and picture names.
+func (s *Store) UpdateRecordWithNames(dataID string, updaterPubKey string, signature string, newText string, newFileData []byte, newFileName string, newPicData []byte, newPicName string) (*Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -519,6 +629,16 @@ func (s *Store) UpdateRecord(dataID string, updaterPubKey string, signature stri
 		chunkHashes = append(chunkHashes, rec.PictureChunkHash)
 	}
 
+	if newFileName != "" {
+		rec.FileName = newFileName
+	}
+	if newPicName != "" {
+		rec.PictureName = newPicName
+	}
+	if rec.FileName == "" && rec.PictureName != "" {
+		rec.FileName = rec.PictureName
+	}
+
 	chunkHashes = append(chunkHashes, crypto.HashBytes([]byte(newText)))
 	tree, err := crypto.BuildMerkleTree(chunkHashes)
 	if err == nil {
@@ -527,6 +647,7 @@ func (s *Store) UpdateRecord(dataID string, updaterPubKey string, signature stri
 
 	rec.TotalBytes = int64(len(rec.Text) + len(newFileData) + len(newPicData))
 	rec.OwnerSignature = signature
+	syncACLFromText(rec)
 
 	if err := s.saveRecordDisk(rec); err != nil {
 		return nil, err
