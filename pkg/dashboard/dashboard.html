@@ -472,7 +472,7 @@
         <span style="font-size:1.3rem;">⚡</span>
         <span>StiQRcloud DB</span>
       </div>
-      <span class="badge badge-primary" id="version-tag">v0.1.0</span>
+      <span class="badge badge-primary" id="version-tag">v0.3.0</span>
     </div>
 
     <div class="sidebar-scroll">
@@ -507,7 +507,7 @@
       </div>
       <div class="nav-item" id="nav-item-settings" onclick="switchSystemTab('settings')">
         <span class="nav-item-name">⚙️ Settings & Updates</span>
-        <span class="badge badge-success" id="sidebar-up-to-date" style="font-size:0.65rem;">v0.1.0</span>
+        <span class="badge badge-success" id="sidebar-up-to-date" style="font-size:0.65rem;">v0.3.0</span>
       </div>
     </div>
 
@@ -919,7 +919,7 @@
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
             <div>
               <span style="color:var(--text-muted);font-size:0.85rem;">INSTALLED VERSION:</span>
-              <span style="font-weight:700;color:#fff;margin-left:8px;" id="settings-cur-ver">v0.1.0</span>
+              <span style="font-weight:700;color:#fff;margin-left:8px;" id="settings-cur-ver">v0.3.0</span>
             </div>
             <div>
               <span style="color:var(--text-muted);font-size:0.85rem;">LATEST AVAILABLE:</span>
@@ -1349,6 +1349,8 @@
       document.getElementById('view-records').style.display = 'block';
       document.getElementById('view-mesh').style.display = 'none';
       document.getElementById('view-audits').style.display = 'none';
+      const personalView = document.getElementById('view-personal');
+      if (personalView) personalView.style.display = 'none';
       document.getElementById('view-settings').style.display = 'none';
 
       document.getElementById('schema-fields-bar').style.display = 'flex';
@@ -1930,6 +1932,8 @@
               </tr>
             `;
           }).join('');
+        }
+
         // Personal Swarm, Partition & Airgap
         if (data.personal_nodes) {
           const pCount = data.personal_nodes.length;

@@ -1,0 +1,9 @@
+8eec76b2e645062d7a0952c95d0ce7d70d79f6c125544793ece5d1a77db2433a  stiqrcloud-darwin-arm64
+40db87eb17a5991e2b579b422f1d654f7f17da14eb1799157326b95d56655e86  stiqrcloud-linux-amd64
+d02bc67e4b34a02b709619ad08c8f6b4511c95207d40a1f413c2dd389c486419  stiqrcloud-linux-arm64
+8918ed2ba94eff2c72134d7b6665907f51775717e32969f985bdc6afa646c2f5  stiqrcloud-v0.3.0-all-platforms.tar.gz
+4a7bfa681f26a1edea339abd229eaa2b9864fed71f71ead6bcfd133efe7fc0ef  stiqrcloud-v0.3.0-darwin-arm64.tar.gz
+7f7e39bccace0e6cecef98fa9b0b4693c44961c0ca86d3f77f54e38ef203fc4c  stiqrcloud-v0.3.0-linux-amd64.tar.gz
+dd50d7be6d60e77b222095d2e7d3e8c54ce57cb9240068604cffc2c637e81aa7  stiqrcloud-v0.3.0-linux-arm64.tar.gz
+30127f54e1ef6c42b3cf055f6351a1f09dc5ecb3cfd993aa4766efbd3556d555  stiqrcloud-v0.3.0-windows-amd64.zip
+4d2696f492b000b48211d6f614dae43cf568853e1ad873220dd9f2e11972e2a4  stiqrcloud-windows-amd64.exe

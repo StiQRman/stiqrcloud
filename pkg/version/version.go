@@ -9,7 +9,7 @@ import (
 
 // Current semantic version of the database node.
 const (
-	CurrentVersion = "v0.2.0"
+	CurrentVersion = "v0.3.0"
 	AppName        = "stiqrcloud"
 	UpdateFeedURL  = "https://raw.githubusercontent.com/stiqrhub/stiqrcloud/main/releases/version.json"
 )
@@ -37,6 +37,23 @@ type UpdateStatus struct {
 
 // Built-in initial release history.
 var DefaultHistory = []Release{
+	{
+		Version:     "v0.3.0",
+		ReleaseDate: time.Date(2026, 10, 20, 14, 0, 0, 0, time.UTC),
+		Title:       "Personal Swarm Mirroring, Airgap Cold Backups & Public WAN Gateway",
+		Changelog: []string{
+			"Personal Swarm multi-node automatic mirroring across trusted Reticulum and LAN peers",
+			"Relaxed 0-fee zero-knowledge audits for owner-paired personal swarm nodes",
+			"Airgap Cold Backup workflow with instant synchronization and safe-to-disconnect status",
+			"Configurable storage partition controls (Personal Quota vs Public Mesh Quota) and Satoshis pricing",
+			"Public WAN dashboard access toggle (-allow-public-dashboard) with Cloudflare Tunnel compatibility",
+			"Zero-dependency pure JS Reticulum node QR code generator and interactive dashboard UI",
+			"PocketBase API compatibility layer and resilient chunk-based note attachment sync",
+		},
+		DownloadURL: "https://github.com/StiQRman/stiqrcloud/releases/tag/v0.3.0",
+		ChecksumSHA: "8918ed2ba94eff2c72134d7b6665907f51775717e32969f985bdc6afa646c2f5",
+		IsMandatory: false,
+	},
 	{
 		Version:     "v0.2.0",
 		ReleaseDate: time.Date(2026, 10, 14, 20, 0, 0, 0, time.UTC),

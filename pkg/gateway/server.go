@@ -2606,6 +2606,8 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	// Search ONLY in designated release folders
 	searchPaths := []string{
 		filepath.Join("releases", filename),
+		filepath.Join("releases", version.CurrentVersion, filename),
+		filepath.Join("releases", "v0.3.0", filename),
 		filepath.Join("releases", "v0.2.0", filename),
 		filepath.Join("releases_storage", filename),
 	}
@@ -2614,6 +2616,8 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		exeDir := filepath.Dir(exePath)
 		searchPaths = append(searchPaths,
 			filepath.Join(exeDir, "releases", filename),
+			filepath.Join(exeDir, "releases", version.CurrentVersion, filename),
+			filepath.Join(exeDir, "releases", "v0.3.0", filename),
 			filepath.Join(exeDir, "releases", "v0.2.0", filename),
 			filepath.Join(exeDir, "releases_storage", filename),
 		)

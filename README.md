@@ -1,6 +1,6 @@
 # StiQRcloud
 
-[![Version: v0.2.0](https://img.shields.io/badge/Version-v0.2.0-blue.svg)](releases/version.json)
+[![Version: v0.3.0](https://img.shields.io/badge/Version-v0.3.0-blue.svg)](releases/version.json)
 [![Go: 1.23+](https://img.shields.io/badge/Go-1.23+-00ADD8.svg?style=flat&logo=go)](https://golang.org)
 [![Reticulum Network Stack](https://img.shields.io/badge/Network-Reticulum%20RNS%20Compatible-purple.svg)](https://reticulum.network)
 [![Bitcoin Lightning](https://img.shields.io/badge/Payments-Lightning%20Network-F7931A.svg?logo=bitcoin)](https://lightning.network)
@@ -86,7 +86,7 @@ Access your private local operator dashboard at:
 ## Settings Update Card & Version Management
 
 Adhering strictly to **Semantic Versioning (`vMAJOR.MINOR.PATCH`)**:
-- Current Version: `v0.2.0`
+- Current Version: `v0.3.0`
 - The built-in dashboard includes a dedicated **Settings & Updates** card that checks version status, queries release history, displays changelogs, and supports direct downloads.
 
 ---

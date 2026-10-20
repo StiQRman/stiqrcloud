@@ -1,6 +1,6 @@
 {
   "name": "@stiqrhub/stiqrcloud",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Official TypeScript & JavaScript SDK for StiQRcloud decentralized storage mesh",
   "main": "./dist/index.js",

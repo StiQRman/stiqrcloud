@@ -219,6 +219,17 @@ pkill -9 stiqrcloud
 - **New Record Modal**: Allows data owners to enter specific RNode destination hashes or leave blank to automatically select random 2-of-3 quorum peers.
 - **SDK Routing**: Full support in `CreateRecordOptions.storagePeers` for explicit RNode and peer destination arrays.
 
+### 14. Personal Swarm, Airgap Cold Backups & Public WAN Gateway (`v0.3.0`)
+- **Deployed Version**: `v0.3.0` (ARM64 static binary on Raspberry Pi, AMD64 on Workstation)
+- **Deployment Target**: Raspberry Pi 4/5 (`10.0.0.2:8100`, service `stiqrcloud.service`) & Workstation (`10.0.0.23:8100`)
+- **Key Capabilities Live**:
+  - **Personal Swarm Mirroring**: Enter peer Reticulum RNode addresses or LAN URLs to pair hardware. All collections and records automatically synchronize 100% across owned devices.
+  - **Relaxed 0-Fee Audits**: Personal swarm peers operate under trusted owner audits with zero satoshi micro-escrow overhead.
+  - **Airgap Cold Backup Workflow**: Dedicated status card, live readiness indicator, and single-click `Sync & Prepare for Airgap` ensuring safe offline disconnect.
+  - **Storage Split Controls**: Interactive slider allocating local disk quota between private Personal Swarm and Public Mesh hosting with configurable satoshi pricing.
+  - **Public WAN Gateway Access**: `-allow-public-dashboard` flag enables operator web dashboard access over Cloudflare Tunnel (`stiqrcloud.stiqrnotes.com/dashboard`) without compromising backend zero-trust invariants.
+  - **PocketBase API Layer & Dynamic Note Attachments**: Resilient multipart sync preserving invariant Data IDs and handling binary image chunks seamlessly.
+
 ---
 
 ## 6. Verification Endpoints & Test Commands

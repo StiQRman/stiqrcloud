@@ -1,5 +1,22 @@
 [
   {
+    "version": "v0.3.0",
+    "release_date": "2026-10-20T14:00:00Z",
+    "title": "Personal Swarm Mirroring, Airgap Cold Backups & Public WAN Gateway",
+    "changelog": [
+      "Personal Swarm multi-node automatic mirroring across trusted Reticulum and LAN peers",
+      "Relaxed 0-fee zero-knowledge audits for owner-paired personal swarm nodes",
+      "Airgap Cold Backup workflow with instant synchronization and safe-to-disconnect status",
+      "Configurable storage partition controls (Personal Quota vs Public Mesh Quota) and Satoshis pricing",
+      "Public WAN dashboard access toggle (-allow-public-dashboard) with Cloudflare Tunnel compatibility",
+      "Zero-dependency pure JS Reticulum node QR code generator and interactive dashboard UI",
+      "PocketBase API compatibility layer and resilient chunk-based note attachment sync"
+    ],
+    "download_url": "https://github.com/StiQRman/stiqrcloud/releases/tag/v0.3.0",
+    "checksum_sha": "8918ed2ba94eff2c72134d7b6665907f51775717e32969f985bdc6afa646c2f5",
+    "is_mandatory": false
+  },
+  {
     "version": "v0.2.0",
     "release_date": "2026-10-14T20:00:00Z",
     "title": "Post-Quantum 2-of-3 Threshold & PocketBase Collections UI",
