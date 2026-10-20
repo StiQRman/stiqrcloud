@@ -35,3 +35,6 @@ __pycache__/
 node_modules/
 sdk/ts/dist/
 package-lock.json
+
+# Internal Agent Directives
+instructions.md
