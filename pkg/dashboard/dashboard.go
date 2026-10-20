@@ -111,6 +111,17 @@ func (s *Server) HandleStatsJSON(w http.ResponseWriter, r *http.Request) {
 		gw = s.rnsManager.GetActiveGateway()
 	}
 
+	var storageSplit storage.StorageSplitConfig
+	if s.store != nil {
+		storageSplit = s.store.GetStorageSplit()
+	}
+	var personalNodes []*p2p.PersonalNode
+	var airgapStatus map[string]interface{}
+	if s.swarm != nil {
+		personalNodes = s.swarm.ListPersonalNodes()
+		airgapStatus = s.swarm.AirgapStatus()
+	}
+
 	res := map[string]interface{}{
 		"app_name":           version.AppName,
 		"version":            version.CurrentVersion,
@@ -124,6 +135,9 @@ func (s *Server) HandleStatsJSON(w http.ResponseWriter, r *http.Request) {
 		"reticulum_gateway":  gw,
 		"reticulum_peers":    rnsPeers,
 		"storage":            storageStats,
+		"storage_split":      storageSplit,
+		"personal_nodes":     personalNodes,
+		"airgap_status":      airgapStatus,
 		"peers_count":        len(peers),
 		"online_peers_count": onlinePeers,
 		"peers":              peers,

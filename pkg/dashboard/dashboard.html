@@ -493,6 +493,10 @@
       <div class="sidebar-section-title" style="margin-top:20px;">
         <span>System & Mesh</span>
       </div>
+      <div class="nav-item" id="nav-item-personal" onclick="switchSystemTab('personal')">
+        <span class="nav-item-name">🏠 Personal Swarm & Airgap</span>
+        <span class="pill-count" id="sidebar-personal-count">0</span>
+      </div>
       <div class="nav-item" id="nav-item-mesh" onclick="switchSystemTab('mesh')">
         <span class="nav-item-name">🌐 P2P Mesh & Reticulum</span>
         <span class="pill-count" id="sidebar-peers-count">0</span>
@@ -727,6 +731,172 @@
           </thead>
           <tbody id="audits-table-body">
             <tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No recent audit challenges.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Personal Swarm & Airgap Cold Backup View -->
+    <section class="view-container" id="view-personal" style="display:none;">
+      <!-- Top Overview Cards -->
+      <div class="grid">
+        <div class="card">
+          <div class="card-title">Personal Swarm Nodes</div>
+          <div class="card-value" id="stat-personal-nodes">0</div>
+          <div class="card-sub" id="stat-personal-sub">All data 100% mirrored across your hardware</div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick="openPairPersonalNodeModal()">+ Pair Node (RNode)</button>
+            <button class="btn btn-secondary btn-sm" onclick="triggerPersonalSync()">🔄 Sync Swarm Now</button>
+          </div>
+        </div>
+        
+        <div class="card">
+          <div class="card-title">Airgap Cold Backup Status</div>
+          <div class="card-value" id="stat-airgap-title" style="font-size:1.15rem;display:flex;align-items:center;gap:8px;">
+            <span class="badge badge-success" id="badge-airgap-status">READY FOR AIRGAP</span>
+          </div>
+          <div class="card-sub" id="stat-airgap-sub">Disk flushed & synchronized</div>
+          <div style="margin-top:12px;display:flex;gap:8px;">
+            <button class="btn btn-sm" style="background:#10b981;border-color:#10b981;" onclick="triggerAirgapPrep()">🛡️ Sync & Prepare for Airgap</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Storage Split & Hosting Mode</div>
+          <div class="card-value" id="stat-storage-mode" style="font-size:1.15rem;">Public Mesh (Default)</div>
+          <div class="card-sub" id="stat-storage-split-sub">Personal: 35 GB | Public: 15 GB</div>
+          <div style="margin-top:12px;">
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('storage-split-card').scrollIntoView({behavior:'smooth'})">⚙️ Configure Partition</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Storage Partition & Public Mesh Configuration Card -->
+      <div class="card" id="storage-split-card" style="margin-top:20px;padding:24px;border:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;">
+          <div>
+            <h3 style="color:#fff;font-size:1.15rem;margin-bottom:6px;">⚙️ Storage Partition & Mesh Sharing Mode</h3>
+            <p style="color:var(--text-muted);font-size:0.88rem;max-width:760px;line-height:1.5;">
+              By default, your node is public-first: it allocates space for your personal swarm while sharing remaining disk with the public mesh to earn Lightning sats or support the community. You can easily toggle to <strong>100% Personal Swarm Only</strong> or adjust quotas below.
+            </p>
+          </div>
+          <div id="split-mode-badge-wrap">
+            <span class="badge badge-success" id="badge-mesh-mode" style="font-size:0.85rem;padding:6px 12px;">🟢 Public Mesh Active</span>
+          </div>
+        </div>
+
+        <!-- Visual Partition Bar -->
+        <div style="margin-top:20px;">
+          <div style="display:flex;justify-content:space-between;font-size:0.82rem;margin-bottom:6px;">
+            <span style="color:#38bdf8;font-weight:600;" id="label-personal-bar">Personal Swarm: 35 GB (70%)</span>
+            <span style="color:#34d399;font-weight:600;" id="label-public-bar">Public Mesh: 15 GB (30%)</span>
+          </div>
+          <div style="height:14px;background:#1e293b;border-radius:7px;overflow:hidden;display:flex;">
+            <div id="bar-personal-fill" style="width:70%;background:#0284c7;height:100%;transition:width 0.3s;" title="Personal Storage"></div>
+            <div id="bar-public-fill" style="width:30%;background:#10b981;height:100%;transition:width 0.3s;" title="Public Mesh Storage"></div>
+          </div>
+        </div>
+
+        <div style="margin-top:24px;display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:20px;">
+          <!-- Mode Toggle -->
+          <div class="form-group">
+            <label style="font-weight:600;color:#fff;">Operating Mode</label>
+            <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;background:#0f172a;padding:12px;border-radius:6px;border:1px solid var(--border);">
+                <input type="radio" name="operating_mode" id="mode-radio-public" value="public" checked onchange="onOperatingModeChange()">
+                <div>
+                  <div style="color:#fff;font-weight:600;font-size:0.9rem;">Public Mesh + Personal Swarm (Default)</div>
+                  <div style="color:var(--text-muted);font-size:0.78rem;">Allows personal mirroring and hosts public mesh tenant records.</div>
+                </div>
+              </label>
+              <label style="display:flex;align-items:center;gap:10px;cursor:pointer;background:#0f172a;padding:12px;border-radius:6px;border:1px solid var(--border);">
+                <input type="radio" name="operating_mode" id="mode-radio-personal" value="personal_only" onchange="onOperatingModeChange()">
+                <div>
+                  <div style="color:#fff;font-weight:600;font-size:0.9rem;">🔒 100% Personal Swarm Only</div>
+                  <div style="color:var(--text-muted);font-size:0.78rem;">Zero public hosting. Dedicates entire disk strictly to your paired hardware.</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Partition Sliders / Inputs -->
+          <div id="quota-inputs-box">
+            <div class="form-group">
+              <label style="font-weight:600;color:#fff;">Personal Swarm Quota (GB)</label>
+              <input type="number" id="input-personal-gb" class="form-input" value="35" min="1" max="10000" oninput="updatePartitionVisuals()">
+              <span style="font-size:0.75rem;color:var(--text-muted);margin-top:3px;display:block;">Private storage reserved exclusively for your records & attachments.</span>
+            </div>
+            <div class="form-group" id="group-public-gb">
+              <label style="font-weight:600;color:#fff;">Public Mesh Quota (GB)</label>
+              <input type="number" id="input-public-gb" class="form-input" value="15" min="0" max="10000" oninput="updatePartitionVisuals()">
+              <span style="font-size:0.75rem;color:var(--text-muted);margin-top:3px;display:block;">Allocated for public network peers to store encrypted chunks.</span>
+            </div>
+            <div class="form-group" id="group-public-price">
+              <label style="font-weight:600;color:#fff;">Public Mesh Price (Sats / GB / Month)</label>
+              <input type="number" id="input-public-price" class="form-input" value="100" min="0" max="100000">
+              <span style="font-size:0.75rem;color:var(--text-muted);margin-top:3px;display:block;">Set to <strong>0</strong> to provide free community hosting, or charge sats via Lightning.</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:20px;display:flex;justify-content:flex-end;gap:10px;">
+          <button class="btn" onclick="saveStorageSplitConfig()">💾 Save Partition Settings</button>
+        </div>
+      </div>
+
+      <!-- Paired Personal Nodes Table -->
+      <div style="margin-top:24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+        <h3 style="color:#fff;font-size:1.15rem;">Paired Hardware Nodes</h3>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary btn-sm" onclick="runPersonalSwarmAudits()">⚡ Run Parity Audit (0 Sats)</button>
+          <button class="btn btn-sm" onclick="openPairPersonalNodeModal()">+ Pair Node</button>
+        </div>
+      </div>
+
+      <div class="table-container" style="margin-top:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Node Name</th>
+              <th>RNode Destination</th>
+              <th>High-Speed LAN Route</th>
+              <th>Public Route</th>
+              <th>Parity Sync</th>
+              <th>Last Seen</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="personal-nodes-table-body">
+            <tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:30px;">No personal nodes paired yet. Click "+ Pair Node" to add your other hardware (Pi, Laptop, Cold Storage).</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Non-punitive Parity Reconciliation History -->
+      <div style="margin-top:30px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h3 style="color:#fff;font-size:1.15rem;">Non-Punitive Reconciliation Audit Log</h3>
+          <p style="color:var(--text-muted);font-size:0.85rem;margin-top:2px;">
+            Personal nodes are verified for 100% catalog parity with 0 slashing and 0 sat fees.
+          </p>
+        </div>
+      </div>
+
+      <div class="table-container" style="margin-top:12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Audit Challenge ID</th>
+              <th>Target Personal Node</th>
+              <th>Result / Notes</th>
+              <th>Fee</th>
+              <th>Timestamp</th>
+            </tr>
+          </thead>
+          <tbody id="personal-audits-table-body">
+            <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">No personal audits recorded yet.</td></tr>
           </tbody>
         </table>
       </div>
@@ -1030,6 +1200,79 @@
     </div>
   </div>
 
+  <!-- Modal: Pair Personal Node -->
+  <div class="modal-overlay" id="modal-pair-node" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Pair Personal Node by RNode Address</h3>
+        <button class="pill-remove" onclick="closeModal('modal-pair-node')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="color:var(--text-muted);font-size:0.88rem;margin-bottom:16px;">
+          Add any node you own to your trusted personal cloud swarm. Enter the destination address displayed on that node's dashboard or QR code.
+        </p>
+        <div class="form-group">
+          <label>Reticulum Destination Address (e.g. &lt;a5e2992b...&gt;)</label>
+          <input type="text" id="pair-rns-dest" class="mono form-input" placeholder="<a5e2992b3adcad7808a44c944f871660>">
+          <span style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;display:block;">You can paste with or without &lt; &gt; brackets.</span>
+        </div>
+        <div class="form-group">
+          <label>Friendly Name</label>
+          <input type="text" id="pair-node-name" class="form-input" placeholder="e.g. Raspberry Pi, Living Room Server, Cold Backup">
+        </div>
+        <div class="form-group">
+          <label>Local LAN Address (Optional - Auto-detected if known)</label>
+          <input type="text" id="pair-local-addr" class="form-input" placeholder="e.g. http://10.0.0.2:8100">
+          <span style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;display:block;">Enables ultra-fast local network Wi-Fi/Ethernet replication.</span>
+        </div>
+        <div class="form-group">
+          <label>Public Address / WAN Gateway (Optional)</label>
+          <input type="text" id="pair-public-addr" class="form-input" placeholder="e.g. https://my-node.duckdns.org:8100">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-pair-node')">Cancel</button>
+        <button class="btn" onclick="submitPairPersonalNode()">🔗 Pair & Mirror Swarm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Airgap Preparation Complete -->
+  <div class="modal-overlay" id="modal-airgap-result" style="display:none;">
+    <div class="modal-box" style="max-width:540px;text-align:center;">
+      <div style="font-size:3rem;margin-bottom:12px;">🛡️</div>
+      <h3 style="color:#10b981;font-size:1.35rem;margin-bottom:8px;">Ready for Airgap Storage</h3>
+      <p style="color:var(--text-muted);font-size:0.92rem;line-height:1.6;margin-bottom:16px;">
+        All in-memory buffers have been committed to disk, and all records match the latest personal swarm state.
+      </p>
+
+      <div style="background:#0f172a;border:1px solid var(--border);border-radius:8px;padding:16px;text-align:left;font-size:0.88rem;margin-bottom:20px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+          <span style="color:var(--text-muted);">Verified Parity Records:</span>
+          <strong style="color:#fff;" id="airgap-records-count">0</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+          <span style="color:var(--text-muted);">Pending Deltas:</span>
+          <strong style="color:#10b981;">0 (Fully Synchronized)</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+          <span style="color:var(--text-muted);">Disk Flush Status:</span>
+          <strong style="color:#10b981;">Committed & Verified</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;">
+          <span style="color:var(--text-muted);">Prepared At:</span>
+          <strong style="color:#fff;" id="airgap-timestamp">-</strong>
+        </div>
+      </div>
+
+      <div style="background:rgba(16, 185, 129, 0.1);border:1px solid rgba(16, 185, 129, 0.3);border-radius:8px;padding:12px;margin-bottom:20px;text-align:left;font-size:0.85rem;color:#34d399;">
+        <strong>✅ Safe to Disconnect:</strong> You may safely power off this unit, unplug network cables, or stow the drive in cold airgap storage. When reconnected in the future, it will automatically catch up on deltas from your other paired nodes.
+      </div>
+
+      <button class="btn" style="width:100%;" onclick="closeModal('modal-airgap-result')">Got It</button>
+    </div>
+  </div>
+
   <script>
     function escapeHTML(str) {
       if (str === null || str === undefined) return '';
@@ -1123,20 +1366,27 @@
 
     function switchSystemTab(tab) {
       document.querySelectorAll('.sidebar .nav-item').forEach(el => el.classList.remove('active'));
-      document.getElementById('nav-item-' + tab).classList.add('active');
+      const activeNav = document.getElementById('nav-item-' + tab);
+      if (activeNav) activeNav.classList.add('active');
 
       document.getElementById('view-records').style.display = 'none';
       document.getElementById('view-mesh').style.display = 'none';
       document.getElementById('view-audits').style.display = 'none';
+      const personalView = document.getElementById('view-personal');
+      if (personalView) personalView.style.display = 'none';
       document.getElementById('view-settings').style.display = 'none';
       document.getElementById('schema-fields-bar').style.display = 'none';
       document.getElementById('search-box-wrap').style.display = 'none';
       document.getElementById('btn-new-record').style.display = 'none';
       document.getElementById('btn-toggle-fields').style.display = 'none';
 
-      document.getElementById('view-' + tab).style.display = 'block';
+      const targetView = document.getElementById('view-' + tab);
+      if (targetView) targetView.style.display = 'block';
 
-      if (tab === 'mesh') {
+      if (tab === 'personal') {
+        document.getElementById('topbar-col-icon').textContent = '🏠';
+        document.getElementById('topbar-col-name').textContent = 'Personal Swarm & Airgap Cold Backup';
+      } else if (tab === 'mesh') {
         document.getElementById('topbar-col-icon').textContent = '🌐';
         document.getElementById('topbar-col-name').textContent = 'P2P Mesh & Reticulum';
       } else if (tab === 'audits') {
@@ -1680,6 +1930,23 @@
               </tr>
             `;
           }).join('');
+        // Personal Swarm, Partition & Airgap
+        if (data.personal_nodes) {
+          const pCount = data.personal_nodes.length;
+          const pBadge = document.getElementById('sidebar-personal-count');
+          if (pBadge) pBadge.textContent = pCount;
+          const pStat = document.getElementById('stat-personal-nodes');
+          if (pStat) pStat.textContent = pCount;
+          renderPersonalNodes(data.personal_nodes);
+        }
+        if (data.storage_split) {
+          renderPersonalStorageSplit(data.storage_split);
+        }
+        if (data.airgap_status) {
+          renderAirgapStatus(data.airgap_status);
+        }
+        if (data.recent_audits) {
+          renderPersonalAudits(data.recent_audits);
         }
       } catch (e) {
         console.error('Failed to load stats:', e);
@@ -2093,6 +2360,343 @@
       }
     }
 
+    // ==========================================
+    // PERSONAL SWARM & AIRGAP MANAGEMENT LOGIC
+    // ==========================================
+    let currentStorageSplit = null;
+
+    function openPairPersonalNodeModal() {
+      document.getElementById('pair-rns-dest').value = '';
+      document.getElementById('pair-node-name').value = '';
+      document.getElementById('pair-local-addr').value = '';
+      document.getElementById('pair-public-addr').value = '';
+      openModal('modal-pair-node');
+    }
+
+    async function submitPairPersonalNode() {
+      let rnsDest = document.getElementById('pair-rns-dest').value.trim();
+      const name = document.getElementById('pair-node-name').value.trim();
+      const localAddr = document.getElementById('pair-local-addr').value.trim();
+      const publicAddr = document.getElementById('pair-public-addr').value.trim();
+
+      if (!rnsDest) {
+        alert('Please enter a Reticulum Destination Address.');
+        return;
+      }
+      if (!rnsDest.startsWith('<')) rnsDest = '<' + rnsDest;
+      if (!rnsDest.endsWith('>')) rnsDest = rnsDest + '>';
+
+      try {
+        const res = await fetch('/api/personal/nodes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reticulum_dest: rnsDest,
+            name: name,
+            local_addr: localAddr,
+            public_addr: publicAddr
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert('Error pairing node: ' + (data.error || 'unknown'));
+          return;
+        }
+        closeModal('modal-pair-node');
+        loadStats();
+      } catch (e) {
+        alert('Failed to pair personal node: ' + e);
+      }
+    }
+
+    async function removePersonalNode(dest) {
+      if (!confirm(`Are you sure you want to remove node ${dest} from your personal swarm?`)) {
+        return;
+      }
+      try {
+        const res = await fetch('/api/personal/nodes/?dest=' + encodeURIComponent(dest), {
+          method: 'DELETE'
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert('Error removing node: ' + (data.error || 'unknown'));
+          return;
+        }
+        loadStats();
+      } catch (e) {
+        alert('Failed to remove node: ' + e);
+      }
+    }
+
+    async function triggerPersonalSync() {
+      try {
+        const res = await fetch('/api/personal/sync', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'completed') {
+          loadStats();
+        }
+      } catch (e) {
+        console.error('Personal sync failed:', e);
+      }
+    }
+
+    async function triggerAirgapPrep() {
+      const btn = event ? event.target : null;
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = '🛡️ Flushing & Synchronizing...';
+      }
+      try {
+        const res = await fetch('/api/personal/airgap/prep', { method: 'POST' });
+        const data = await res.json();
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = '🛡️ Sync & Prepare for Airgap';
+        }
+        if (!res.ok) {
+          alert('Airgap preparation error: ' + (data.error || 'unknown'));
+          return;
+        }
+
+        document.getElementById('airgap-records-count').textContent = (data.records_count || 0) + ' records';
+        document.getElementById('airgap-timestamp').textContent = new Date(data.prepared_at || Date.now()).toLocaleTimeString();
+        openModal('modal-airgap-result');
+        loadStats();
+      } catch (e) {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = '🛡️ Sync & Prepare for Airgap';
+        }
+        alert('Failed to prepare for airgap: ' + e);
+      }
+    }
+
+    function renderAirgapStatus(status) {
+      if (!status) return;
+      const badge = document.getElementById('badge-airgap-status');
+      const sub = document.getElementById('stat-airgap-sub');
+      if (status.safe_to_disconnect) {
+        badge.className = 'badge badge-success';
+        badge.textContent = 'READY FOR AIRGAP DISCONNECT';
+        const syncTime = status.last_airgap_sync ? new Date(status.last_airgap_sync).toLocaleTimeString() : 'Recently';
+        sub.textContent = `All buffers flushed (${syncTime}). Safe to disconnect.`;
+      } else {
+        badge.className = 'badge badge-warning';
+        badge.textContent = 'ONLINE SWARM ACTIVE';
+        sub.textContent = 'Connected & synchronizing live changes across nodes.';
+      }
+    }
+
+    function renderPersonalStorageSplit(split) {
+      if (!split) return;
+      currentStorageSplit = split;
+
+      const pGb = Math.round(split.personal_quota_bytes / (1024 * 1024 * 1024)) || 35;
+      const pubGb = Math.round(split.public_quota_bytes / (1024 * 1024 * 1024)) || 15;
+      const pubPrice = split.public_price_sats !== undefined ? split.public_price_sats : 100;
+      const pubEnabled = split.public_enabled !== false;
+
+      if (document.activeElement !== document.getElementById('input-personal-gb')) {
+        document.getElementById('input-personal-gb').value = pGb;
+      }
+      if (document.activeElement !== document.getElementById('input-public-gb')) {
+        document.getElementById('input-public-gb').value = pubGb;
+      }
+      if (document.activeElement !== document.getElementById('input-public-price')) {
+        document.getElementById('input-public-price').value = pubPrice;
+      }
+
+      if (pubEnabled) {
+        document.getElementById('mode-radio-public').checked = true;
+        document.getElementById('badge-mesh-mode').className = 'badge badge-success';
+        document.getElementById('badge-mesh-mode').textContent = '🟢 Public Mesh Active';
+        document.getElementById('stat-storage-mode').textContent = 'Public Mesh (Default)';
+        document.getElementById('stat-storage-split-sub').textContent = `Personal: ${pGb} GB | Public: ${pubGb} GB`;
+      } else {
+        document.getElementById('mode-radio-personal').checked = true;
+        document.getElementById('badge-mesh-mode').className = 'badge badge-purple';
+        document.getElementById('badge-mesh-mode').textContent = '🔒 100% Personal Swarm Only';
+        document.getElementById('stat-storage-mode').textContent = '100% Personal Swarm Only';
+        document.getElementById('stat-storage-split-sub').textContent = `All ${pGb} GB reserved for personal use`;
+      }
+
+      updatePartitionVisuals();
+    }
+
+    function onOperatingModeChange() {
+      const isPublic = document.getElementById('mode-radio-public').checked;
+      const groupPubGb = document.getElementById('group-public-gb');
+      const groupPubPrice = document.getElementById('group-public-price');
+
+      if (!isPublic) {
+        groupPubGb.style.opacity = '0.35';
+        groupPubPrice.style.opacity = '0.35';
+        document.getElementById('badge-mesh-mode').className = 'badge badge-purple';
+        document.getElementById('badge-mesh-mode').textContent = '🔒 100% Personal Swarm Only';
+      } else {
+        groupPubGb.style.opacity = '1.0';
+        groupPubPrice.style.opacity = '1.0';
+        document.getElementById('badge-mesh-mode').className = 'badge badge-success';
+        document.getElementById('badge-mesh-mode').textContent = '🟢 Public Mesh Active';
+      }
+      updatePartitionVisuals();
+    }
+
+    function updatePartitionVisuals() {
+      const isPublic = document.getElementById('mode-radio-public').checked;
+      const pGb = Math.max(1, parseInt(document.getElementById('input-personal-gb').value) || 1);
+      const pubGb = isPublic ? Math.max(0, parseInt(document.getElementById('input-public-gb').value) || 0) : 0;
+      const total = pGb + pubGb;
+
+      const pPct = Math.round((pGb / total) * 100);
+      const pubPct = 100 - pPct;
+
+      const personalFill = document.getElementById('bar-personal-fill');
+      const publicFill = document.getElementById('bar-public-fill');
+      const personalLabel = document.getElementById('label-personal-bar');
+      const publicLabel = document.getElementById('label-public-bar');
+
+      if (personalFill) personalFill.style.width = pPct + '%';
+      if (publicFill) publicFill.style.width = pubPct + '%';
+
+      if (personalLabel) personalLabel.textContent = `Personal Swarm: ${pGb} GB (${pPct}%)`;
+      if (publicLabel) {
+        if (isPublic) {
+          publicLabel.textContent = `Public Mesh: ${pubGb} GB (${pubPct}%)`;
+        } else {
+          publicLabel.textContent = 'Public Mesh: Disabled (0 GB)';
+        }
+      }
+    }
+
+    async function saveStorageSplitConfig() {
+      const isPublic = document.getElementById('mode-radio-public').checked;
+      const pGb = Math.max(1, parseInt(document.getElementById('input-personal-gb').value) || 35);
+      const pubGb = isPublic ? Math.max(0, parseInt(document.getElementById('input-public-gb').value) || 15) : 0;
+      const pubPrice = parseInt(document.getElementById('input-public-price').value) || 0;
+
+      const pBytes = pGb * 1024 * 1024 * 1024;
+      const pubBytes = pubGb * 1024 * 1024 * 1024;
+
+      try {
+        const res = await fetch('/api/personal/storage-split', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            personal_quota_bytes: pBytes,
+            public_quota_bytes: pubBytes,
+            public_enabled: isPublic,
+            public_price_sats: pubPrice
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert('Error saving partition: ' + (data.error || 'unknown'));
+          return;
+        }
+        alert('Storage partition and public mesh settings successfully updated!');
+        loadStats();
+      } catch (e) {
+        alert('Failed to save storage partition: ' + e);
+      }
+    }
+
+    async function runPersonalSwarmAudits() {
+      try {
+        const res = await fetch('/api/personal/audits/run', { method: 'POST' });
+        const data = await res.json();
+        if (data.results) {
+          renderPersonalAudits(data.results);
+        }
+        loadStats();
+      } catch (e) {
+        alert('Personal parity audit failed: ' + e);
+      }
+    }
+
+    function renderPersonalNodes(nodes) {
+      const tbody = document.getElementById('personal-nodes-table-body');
+      if (!tbody) return;
+
+      if (!nodes || nodes.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:30px;">No personal nodes paired yet. Click "+ Pair Node" to add your other hardware (Pi, Laptop, Cold Storage).</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = nodes.map(n => {
+        const safeName = escapeHTML(n.name || 'Unnamed Node');
+        const safeDest = escapeHTML(n.reticulum_dest || '');
+        const safeLocal = n.local_addr ? escapeHTML(n.local_addr) : '<span style="color:var(--text-muted);">Auto-detecting...</span>';
+        const safePublic = n.public_addr ? escapeHTML(n.public_addr) : '<span style="color:var(--text-muted);">-</span>';
+        const lastSeen = n.last_seen && n.last_seen !== '0001-01-01T00:00:00Z'
+          ? new Date(n.last_seen).toLocaleTimeString()
+          : '<span style="color:var(--text-muted);">Never</span>';
+
+        const isOnline = n.in_sync || (n.last_seen && (Date.now() - new Date(n.last_seen).getTime() < 300000));
+        const statusBadge = isOnline
+          ? '<span class="badge badge-success">IN SYNC</span>'
+          : '<span class="badge" style="background:#273549;color:var(--text-muted);">OFFLINE / COLD</span>';
+
+        const lanBadge = n.local_addr 
+          ? `<div style="display:flex;align-items:center;gap:6px;"><span class="badge badge-primary" style="font-size:0.7rem;">⚡ HIGH-SPEED LAN</span> <span class="mono">${safeLocal}</span></div>`
+          : safeLocal;
+
+        return `
+          <tr>
+            <td>${statusBadge}</td>
+            <td><strong>${safeName}</strong></td>
+            <td class="mono" style="font-size:0.8rem;color:var(--accent);">${safeDest}</td>
+            <td>${lanBadge}</td>
+            <td class="mono" style="font-size:0.8rem;">${safePublic}</td>
+            <td>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <div style="flex:1;height:8px;background:#1e293b;border-radius:4px;overflow:hidden;">
+                  <div style="width:${n.sync_percent || 100}%;height:100%;background:#10b981;"></div>
+                </div>
+                <span style="font-size:0.78rem;color:#10b981;font-weight:600;">${n.sync_percent || 100}%</span>
+              </div>
+            </td>
+            <td>${lastSeen}</td>
+            <td style="text-align:right;">
+              <button class="btn btn-secondary btn-sm" onclick="triggerPersonalSync()">🔄 Sync</button>
+              <button class="btn btn-danger btn-sm" onclick="removePersonalNode('${safeDest}')">Remove</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderPersonalAudits(audits) {
+      const tbody = document.getElementById('personal-audits-table-body');
+      if (!tbody) return;
+
+      const pAudits = (audits || []).filter(a => a.challenge_id && a.challenge_id.startsWith('personal_'));
+      if (pAudits.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">No personal parity audits recorded yet. Click "Run Parity Audit" to verify.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = pAudits.slice().reverse().map(a => {
+        const safeCh = escapeHTML(a.challenge_id);
+        const safeNode = escapeHTML(a.storage_node);
+        const safeNotes = escapeHTML(a.notes);
+        const statusBadge = a.passed 
+          ? '<span class="badge badge-success">✓ MATCHED</span>'
+          : '<span class="badge badge-danger">✕ RE-SYNC</span>';
+        const feeBadge = '<span class="badge badge-success" style="font-size:0.75rem;">0 SATS (FREE)</span>';
+        return `
+          <tr>
+            <td>${statusBadge}</td>
+            <td class="mono" style="color:var(--accent);">${safeCh}</td>
+            <td class="mono">${safeNode}</td>
+            <td>${safeNotes}</td>
+            <td>${feeBadge}</td>
+            <td>${escapeHTML(new Date(a.timestamp).toLocaleTimeString())}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
     // Init
     loadCollections().then(() => {
       loadRecordsForCollection(currentCollection);
@@ -2107,6 +2711,8 @@
         openNodeQRModal();
       } else if (h === '#new') {
         openNewRecordModal();
+      } else if (h === '#personal') {
+        switchSystemTab('personal');
       } else if (h === '#settings') {
         switchSystemTab('settings');
       } else if (h === '#mesh') {

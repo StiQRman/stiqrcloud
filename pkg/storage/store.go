@@ -58,6 +58,16 @@ type Record struct {
 // ContractCheckerFunc returns whether a record's contract is expired/unpaid and its expiration timestamp.
 type ContractCheckerFunc func(dataID string) (isExpired bool, expiresAt time.Time)
 
+// StorageSplitConfig configures private personal swarm quota vs public mesh allocation.
+type StorageSplitConfig struct {
+	PersonalQuotaBytes int64     `json:"personal_quota_bytes"` // Bytes reserved for personal swarm (e.g. 35 GB)
+	PublicQuotaBytes   int64     `json:"public_quota_bytes"`   // Bytes allocated for public mesh tenants (e.g. 15 GB)
+	PublicEnabled      bool      `json:"public_enabled"`       // True by default (public-first default)
+	PublicPriceSats    int64     `json:"public_price_sats"`    // Price per GB/month in sats (0 = free community host)
+	AirgapReady        bool      `json:"airgap_ready"`         // Indicates node is fully flushed and ready for airgap disconnect
+	LastAirgapSync     time.Time `json:"last_airgap_sync"`
+}
+
 // StorageStats reports disk, record metrics, and active vs grace retention breakdown.
 type StorageStats struct {
 	UsedBytes        int64   `json:"used_bytes"`
@@ -72,11 +82,13 @@ type StorageStats struct {
 
 // Store handles standalone local database persistence and chunk storage.
 type Store struct {
-	mu              sync.RWMutex
-	baseDir         string
-	chunksDir       string
-	recordsDir      string
-	indexFile       string
+	mu                     sync.RWMutex
+	baseDir                string
+	chunksDir              string
+	recordsDir             string
+	indexFile              string
+	storageSplitFile       string
+	storageSplit           StorageSplitConfig
 	records                map[string]*Record // data_id -> Record
 	customCollections      map[string]bool    // registered collections
 	customCollectionFields map[string][]CollectionField // collection -> custom schema fields
@@ -102,6 +114,7 @@ func NewStore(baseDir string) (*Store, error) {
 		chunksDir:              chunksDir,
 		recordsDir:             recordsDir,
 		indexFile:              filepath.Join(baseDir, "index.json"),
+		storageSplitFile:       filepath.Join(baseDir, "storage_split.json"),
 		schemaFile:             filepath.Join(baseDir, "collections_schema.json"),
 		records:                make(map[string]*Record),
 		customCollections:      make(map[string]bool),
@@ -110,12 +123,88 @@ func NewStore(baseDir string) (*Store, error) {
 	}
 
 	s.loadSchemaFile()
+	s.loadStorageSplit()
 
 	if err := s.loadIndex(); err != nil {
 		return nil, fmt.Errorf("failed to load database index: %w", err)
 	}
 
 	return s, nil
+}
+
+// BaseDir returns the root data directory path.
+func (s *Store) BaseDir() string {
+	return s.baseDir
+}
+
+func (s *Store) loadStorageSplit() {
+	if data, err := os.ReadFile(s.storageSplitFile); err == nil {
+		var cfg StorageSplitConfig
+		if err := json.Unmarshal(data, &cfg); err == nil {
+			s.storageSplit = cfg
+			if cfg.PersonalQuotaBytes > 0 || cfg.PublicQuotaBytes > 0 {
+				s.maxDiskBytes = cfg.PersonalQuotaBytes + cfg.PublicQuotaBytes
+			}
+			return
+		}
+	}
+	// Default: Public-first enabled with 35GB personal / 15GB public split
+	s.storageSplit = StorageSplitConfig{
+		PersonalQuotaBytes: 35 * 1024 * 1024 * 1024,
+		PublicQuotaBytes:   15 * 1024 * 1024 * 1024,
+		PublicEnabled:      true,
+		PublicPriceSats:    100,
+	}
+}
+
+func (s *Store) saveStorageSplit() error {
+	data, err := json.MarshalIndent(s.storageSplit, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.storageSplitFile, data, 0644)
+}
+
+// GetStorageSplit returns the current storage partition configuration.
+func (s *Store) GetStorageSplit() StorageSplitConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.storageSplit
+}
+
+// SetStorageSplit updates the storage partition configuration.
+func (s *Store) SetStorageSplit(cfg StorageSplitConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cfg.PersonalQuotaBytes > 0 {
+		s.storageSplit.PersonalQuotaBytes = cfg.PersonalQuotaBytes
+	}
+	s.storageSplit.PublicQuotaBytes = cfg.PublicQuotaBytes
+	s.storageSplit.PublicEnabled = cfg.PublicEnabled
+	s.storageSplit.PublicPriceSats = cfg.PublicPriceSats
+	s.maxDiskBytes = s.storageSplit.PersonalQuotaBytes + s.storageSplit.PublicQuotaBytes
+	return s.saveStorageSplit()
+}
+
+// SetAirgapReady updates the airgap preparation state.
+func (s *Store) SetAirgapReady(ready bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.storageSplit.AirgapReady = ready
+	if ready {
+		s.storageSplit.LastAirgapSync = time.Now().UTC()
+	}
+	return s.saveStorageSplit()
+}
+
+// FlushDisk writes all in-memory metadata to persistent disk storage and syncs.
+func (s *Store) FlushDisk() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, rec := range s.records {
+		_ = s.saveRecordDisk(rec)
+	}
+	return s.saveStorageSplit()
 }
 
 // SetMaxDiskBytes dynamically configures maximum local storage limit.

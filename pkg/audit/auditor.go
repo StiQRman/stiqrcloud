@@ -321,3 +321,59 @@ func (c *Coordinator) RunAuditCycle() []AuditResult {
 
 	return results
 }
+
+// ReconcilePersonalNodes runs lightweight, 0-fee catalog parity verification across personal swarm nodes.
+func (c *Coordinator) ReconcilePersonalNodes() []AuditResult {
+	if c.swarm == nil {
+		return nil
+	}
+
+	nodes := c.swarm.ListPersonalNodes()
+	var results []AuditResult
+
+	for _, n := range nodes {
+		auditRes := c.swarm.AuditPersonalPeer(n)
+		status, _ := auditRes["status"].(string)
+		synced, _ := auditRes["synced_deltas"].(int)
+		targetRNS, _ := auditRes["target_rns"].(string)
+		targetAddr, _ := auditRes["target_addr"].(string)
+
+		passed := status == "VERIFIED_MATCH" || status == "RECONCILED"
+		shortRNS := targetRNS
+		if len(shortRNS) > 12 {
+			shortRNS = shortRNS[:10] + "...>"
+		}
+		norm := p2p.NormalizeRNSDest(targetRNS)
+		shortNorm := norm
+		if len(shortNorm) > 8 {
+			shortNorm = shortNorm[:8]
+		}
+		chID := fmt.Sprintf("personal_%s_%d", shortNorm, time.Now().UnixNano()%100000)
+
+		notes := fmt.Sprintf("Personal Swarm Parity: %s (%d records reconciled, 0 sats fee)", status, synced)
+		if !passed {
+			notes = fmt.Sprintf("Personal Swarm unreachable at %s (%s)", targetAddr, status)
+		}
+
+		res := AuditResult{
+			ChallengeID: chID,
+			StorageNode: fmt.Sprintf("%s (%s)", n.Name, shortRNS),
+			Passed:      passed,
+			LatencyMs:   1.0,
+			Timestamp:   time.Now().UTC(),
+			Notes:       notes,
+		}
+
+		c.mu.Lock()
+		c.history = append(c.history, res)
+		if len(c.history) > 50 {
+			c.history = c.history[len(c.history)-50:]
+		}
+		c.mu.Unlock()
+
+		results = append(results, res)
+	}
+
+	return results
+}
+

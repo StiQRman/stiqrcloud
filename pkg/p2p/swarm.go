@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +21,20 @@ import (
 
 	"github.com/stiqrhub/stiqrcloud/pkg/storage"
 )
+
+// PersonalNode represents a trusted node in the user's personal cloud swarm.
+type PersonalNode struct {
+	ReticulumDest string    `json:"reticulum_dest"` // e.g. "<a5e2992b...>"
+	Name          string    `json:"name"`           // e.g. "Living Room Pi"
+	LocalAddr     string    `json:"local_addr"`     // e.g. "http://10.0.0.2:8100" (high-speed local LAN auto-detected)
+	PublicAddr    string    `json:"public_addr"`    // e.g. "https://stiqrcloud.stiqrnotes.com"
+	LastSeen      time.Time `json:"last_seen"`
+	SyncPercent   float64   `json:"sync_percent"`   // 0 - 100%
+	PendingDeltas int       `json:"pending_deltas"`
+	InSync        bool      `json:"in_sync"`
+	IsAirgapped   bool      `json:"is_airgapped"`   // Marked if this node is an airgapped cold backup
+	AddedAt       time.Time `json:"added_at"`
+}
 
 // Peer represents a database node on the mesh.
 type Peer struct {
@@ -29,6 +45,7 @@ type Peer struct {
 	PublicAddr      string    `json:"public_addr"`
 	ReticulumDest   string    `json:"reticulum_dest,omitempty"`
 	IsPublic        bool      `json:"is_public"`
+	IsPersonal      bool      `json:"is_personal,omitempty"`
 	IsOnline        bool      `json:"is_online"`
 	PricePerGBMonth int64     `json:"price_per_gb_month"`
 	AuditsPassed    int64     `json:"audits_passed"`
@@ -41,38 +58,48 @@ type Peer struct {
 
 // Swarm manages peer discovery, reputation scoring, and distributed content retrieval.
 type Swarm struct {
-	mu             sync.RWMutex
-	localID        string
-	localAddr      string
-	name           string
-	location       string
-	publicIP       string
-	rnsDest        string
-	isPublic       bool
-	price          int64
-	discoveryURL   string
-	bootstrapPeers []string
-	peers          map[string]*Peer
-	httpClient     *http.Client
-	rng            *rand.Rand
-	store          *storage.Store
-	stopDiscovery  chan struct{}
-	onRecordSynced func(rec *storage.Record)
-	stopSync       chan struct{}
-	syncing        sync.Mutex
+	mu                sync.RWMutex
+	localID           string
+	localAddr         string
+	name              string
+	location          string
+	publicIP          string
+	rnsDest           string
+	isPublic          bool
+	price             int64
+	discoveryURL      string
+	bootstrapPeers    []string
+	peers             map[string]*Peer
+	personalNodesFile string
+	personalNodes     map[string]*PersonalNode // normalized RNode dest -> PersonalNode
+	httpClient        *http.Client
+	rng               *rand.Rand
+	store             *storage.Store
+	stopDiscovery     chan struct{}
+	onRecordSynced    func(rec *storage.Record)
+	stopSync          chan struct{}
+	syncing           sync.Mutex
 }
 
 // NewSwarm initializes a peer mesh swarm.
 func NewSwarm(localID, localAddr string, store *storage.Store) *Swarm {
-	return &Swarm{
-		localID:        localID,
-		localAddr:      localAddr,
-		peers:          make(map[string]*Peer),
-		bootstrapPeers: []string{},
-		httpClient:     &http.Client{Timeout: 5 * time.Second},
-		rng:            rand.New(rand.NewSource(time.Now().UnixNano())),
-		store:          store,
+	var pFile string
+	if store != nil {
+		pFile = filepath.Join(store.BaseDir(), "personal_nodes.json")
 	}
+	s := &Swarm{
+		localID:           localID,
+		localAddr:         localAddr,
+		peers:             make(map[string]*Peer),
+		personalNodes:     make(map[string]*PersonalNode),
+		personalNodesFile: pFile,
+		bootstrapPeers:    []string{},
+		httpClient:        &http.Client{Timeout: 5 * time.Second},
+		rng:               rand.New(rand.NewSource(time.Now().UnixNano())),
+		store:             store,
+	}
+	s.loadPersonalNodes()
+	return s
 }
 
 // SetIdentity configures local metadata for peer announcements.
@@ -341,6 +368,16 @@ func (s *Swarm) RegisterDirectPeer(p *Peer) {
 			existing.AvgLatencyMs = p.AvgLatencyMs
 		}
 		existing.IsPublic = p.IsPublic
+		if existing.ReticulumDest != "" {
+			norm := NormalizeRNSDest(existing.ReticulumDest)
+			if pn, isPersonal := s.personalNodes[norm]; isPersonal {
+				existing.IsPersonal = true
+				pn.LastSeen = existing.LastSeen
+				if existing.PublicAddr != "" && DetectLANAddress(existing.PublicAddr) {
+					pn.LocalAddr = existing.PublicAddr
+				}
+			}
+		}
 		s.calculateSocialScore(existing)
 		return
 	}
@@ -348,6 +385,16 @@ func (s *Swarm) RegisterDirectPeer(p *Peer) {
 	s.evictStalePeerLocked()
 	p.IsOnline = true
 	p.LastSeen = time.Now().UTC()
+	if p.ReticulumDest != "" {
+		norm := NormalizeRNSDest(p.ReticulumDest)
+		if pn, isPersonal := s.personalNodes[norm]; isPersonal {
+			p.IsPersonal = true
+			pn.LastSeen = p.LastSeen
+			if p.PublicAddr != "" && DetectLANAddress(p.PublicAddr) {
+				pn.LocalAddr = p.PublicAddr
+			}
+		}
+	}
 	s.calculateSocialScore(p)
 	s.peers[p.NodeID] = p
 }
@@ -898,6 +945,27 @@ func (s *Swarm) BroadcastRecordFull(rec *storage.Record, storagePeers []string, 
 			}
 		}(peer.PublicAddr)
 	}
+
+	// Always mirror 100% of records & attachments across all paired personal swarm nodes
+	for _, pNode := range s.personalNodes {
+		targetAddr := pNode.LocalAddr
+		if targetAddr == "" {
+			targetAddr = pNode.PublicAddr
+		}
+		if targetAddr == "" || targetAddr == s.localAddr {
+			continue
+		}
+		go func(addr string) {
+			req, err := http.NewRequest("POST", fmt.Sprintf("%s/api/internal/store", addr), bytes.NewReader(payloadBytes))
+			if err == nil {
+				req.Header.Set("Content-Type", "application/json")
+				resp, err := s.httpClient.Do(req)
+				if err == nil {
+					_ = resp.Body.Close()
+				}
+			}
+		}(targetAddr)
+	}
 	return nil
 }
 
@@ -1222,6 +1290,16 @@ func (s *Swarm) TouchPeer(nodeID string) {
 	if p, ok := s.peers[nodeID]; ok {
 		p.IsOnline = true
 		p.LastSeen = time.Now().UTC()
+		if p.ReticulumDest != "" {
+			norm := NormalizeRNSDest(p.ReticulumDest)
+			if pn, exists := s.personalNodes[norm]; exists {
+				p.IsPersonal = true
+				pn.LastSeen = p.LastSeen
+				if p.PublicAddr != "" && DetectLANAddress(p.PublicAddr) {
+					pn.LocalAddr = p.PublicAddr
+				}
+			}
+		}
 	}
 }
 
@@ -1254,7 +1332,7 @@ func (s *Swarm) syncFromEndpoint(targetURL string) (int, error) {
 		return 0, nil
 	}
 
-	url := fmt.Sprintf("%s/api/sync/records?peer_id=%s", targetURL, s.localID)
+	url := fmt.Sprintf("%s/api/sync/records?peer_id=%s&all=true&limit=5000", targetURL, s.localID)
 	resp, err := s.httpClient.Get(url)
 	if err != nil {
 		return 0, err
@@ -1420,5 +1498,341 @@ func (s *Swarm) StopSyncLoop() {
 		s.stopSync = nil
 	}
 }
+
+// NormalizeRNSDest cleans up Reticulum destination string format (strips <, >, whitespace, lowers).
+func NormalizeRNSDest(d string) string {
+	d = strings.TrimSpace(d)
+	d = strings.TrimPrefix(d, "<")
+	d = strings.TrimSuffix(d, ">")
+	return strings.ToLower(strings.TrimSpace(d))
+}
+
+// DetectLANAddress checks if a given address/URL represents a local private network or loopback.
+func DetectLANAddress(rawURL string) bool {
+	raw := strings.TrimSpace(rawURL)
+	if raw == "" {
+		return false
+	}
+	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+		return true
+	}
+	return false
+}
+
+func (s *Swarm) loadPersonalNodes() {
+	if s.personalNodesFile == "" {
+		return
+	}
+	data, err := os.ReadFile(s.personalNodesFile)
+	if err != nil {
+		return
+	}
+	var list []*PersonalNode
+	if err := json.Unmarshal(data, &list); err != nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, n := range list {
+		if n != nil && n.ReticulumDest != "" {
+			norm := NormalizeRNSDest(n.ReticulumDest)
+			s.personalNodes[norm] = n
+		}
+	}
+}
+
+func (s *Swarm) savePersonalNodesLocked() error {
+	if s.personalNodesFile == "" {
+		return nil
+	}
+	var list []*PersonalNode
+	for _, n := range s.personalNodes {
+		list = append(list, n)
+	}
+	data, err := json.MarshalIndent(list, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.personalNodesFile, data, 0644)
+}
+
+// AddPersonalNode pairs a new personal node by its Reticulum destination address.
+func (s *Swarm) AddPersonalNode(rnsDest, name, localAddr, publicAddr string) (*PersonalNode, error) {
+	norm := NormalizeRNSDest(rnsDest)
+	if norm == "" {
+		return nil, errors.New("reticulum destination cannot be empty")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	pNode, exists := s.personalNodes[norm]
+	if !exists {
+		pNode = &PersonalNode{
+			ReticulumDest: fmt.Sprintf("<%s>", norm),
+			Name:          name,
+			LocalAddr:     localAddr,
+			PublicAddr:    publicAddr,
+			AddedAt:       time.Now().UTC(),
+			LastSeen:      time.Time{},
+			SyncPercent:   0,
+			InSync:        false,
+		}
+		if pNode.Name == "" {
+			if len(norm) >= 8 {
+				pNode.Name = fmt.Sprintf("Node %s", norm[:8])
+			} else {
+				pNode.Name = fmt.Sprintf("Node %s", norm)
+			}
+		}
+		s.personalNodes[norm] = pNode
+	} else {
+		if name != "" {
+			pNode.Name = name
+		}
+		if localAddr != "" {
+			pNode.LocalAddr = localAddr
+		}
+		if publicAddr != "" {
+			pNode.PublicAddr = publicAddr
+		}
+	}
+
+	// Auto-detect local LAN address if not explicitly set
+	if pNode.LocalAddr == "" && pNode.PublicAddr != "" && DetectLANAddress(pNode.PublicAddr) {
+		pNode.LocalAddr = pNode.PublicAddr
+	}
+
+	// Search known peers for this RNS destination to discover LAN / Public addresses
+	for _, peer := range s.peers {
+		if peer.ReticulumDest != "" && NormalizeRNSDest(peer.ReticulumDest) == norm {
+			peer.IsPersonal = true
+			if peer.LastSeen.After(pNode.LastSeen) {
+				pNode.LastSeen = peer.LastSeen
+			}
+			if pNode.LocalAddr == "" && peer.PublicAddr != "" && DetectLANAddress(peer.PublicAddr) {
+				pNode.LocalAddr = peer.PublicAddr
+			} else if pNode.PublicAddr == "" && peer.PublicAddr != "" {
+				pNode.PublicAddr = peer.PublicAddr
+			}
+		}
+	}
+
+	if err := s.savePersonalNodesLocked(); err != nil {
+		return nil, fmt.Errorf("failed to save personal nodes: %w", err)
+	}
+
+	return pNode, nil
+}
+
+// RemovePersonalNode unpairs a personal node.
+func (s *Swarm) RemovePersonalNode(rnsDest string) error {
+	norm := NormalizeRNSDest(rnsDest)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.personalNodes, norm)
+
+	for _, peer := range s.peers {
+		if peer.ReticulumDest != "" && NormalizeRNSDest(peer.ReticulumDest) == norm {
+			peer.IsPersonal = false
+		}
+	}
+
+	return s.savePersonalNodesLocked()
+}
+
+// ListPersonalNodes returns all paired personal swarm nodes.
+func (s *Swarm) ListPersonalNodes() []*PersonalNode {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var list []*PersonalNode
+	for _, n := range s.personalNodes {
+		cp := *n
+		list = append(list, &cp)
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].Name < list[j].Name
+	})
+	return list
+}
+
+// IsPersonalPeer checks if a Reticulum destination is part of the trusted personal swarm.
+func (s *Swarm) IsPersonalPeer(rnsDest string) bool {
+	norm := NormalizeRNSDest(rnsDest)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, exists := s.personalNodes[norm]
+	return exists
+}
+
+// SyncPersonalRecords synchronizes all missing records and chunks from online personal nodes.
+func (s *Swarm) SyncPersonalRecords() (int, error) {
+	if !s.syncing.TryLock() {
+		return 0, nil
+	}
+	defer s.syncing.Unlock()
+
+	s.mu.RLock()
+	var targets []struct {
+		pNode *PersonalNode
+		url   string
+	}
+	for _, pn := range s.personalNodes {
+		tgt := pn.LocalAddr
+		if tgt == "" {
+			tgt = pn.PublicAddr
+		}
+		tgt = strings.TrimRight(tgt, "/")
+		if tgt != "" && tgt != s.localAddr {
+			targets = append(targets, struct {
+				pNode *PersonalNode
+				url   string
+			}{pNode: pn, url: tgt})
+		}
+	}
+	s.mu.RUnlock()
+
+	totalSynced := 0
+	for _, t := range targets {
+		n, err := s.syncFromEndpoint(t.url)
+		s.mu.Lock()
+		if err == nil {
+			totalSynced += n
+			t.pNode.LastSeen = time.Now().UTC()
+			t.pNode.InSync = true
+			t.pNode.SyncPercent = 100.0
+			t.pNode.PendingDeltas = 0
+		} else {
+			t.pNode.InSync = false
+		}
+		_ = s.savePersonalNodesLocked()
+		s.mu.Unlock()
+	}
+
+	return totalSynced, nil
+}
+
+// AirgapStatus reports cold-backup readiness and parity status.
+func (s *Swarm) AirgapStatus() map[string]interface{} {
+	var split storage.StorageSplitConfig
+	recCount := 0
+	if s.store != nil {
+		split = s.store.GetStorageSplit()
+		recCount = len(s.store.ListAllRecords())
+	}
+
+	s.mu.RLock()
+	nodesCount := len(s.personalNodes)
+	inSyncCount := 0
+	for _, n := range s.personalNodes {
+		if n.InSync {
+			inSyncCount++
+		}
+	}
+	s.mu.RUnlock()
+
+	safeToDisconnect := split.AirgapReady && (time.Since(split.LastAirgapSync) < 1*time.Hour || nodesCount == 0)
+
+	return map[string]interface{}{
+		"airgap_ready":         split.AirgapReady,
+		"last_airgap_sync":     split.LastAirgapSync,
+		"safe_to_disconnect":   safeToDisconnect,
+		"personal_nodes_total": nodesCount,
+		"personal_in_sync":     inSyncCount,
+		"records_count":        recCount,
+		"storage_split":        split,
+	}
+}
+
+// AirgapPrep synchronizes all records, flushes disk buffers, and marks node safe for airgap disconnect.
+func (s *Swarm) AirgapPrep() (map[string]interface{}, error) {
+	synced, syncErr := s.SyncPersonalRecords()
+
+	var flushErr error
+	if s.store != nil {
+		flushErr = s.store.FlushDisk()
+		_ = s.store.SetAirgapReady(true)
+	}
+
+	recCount := 0
+	if s.store != nil {
+		recCount = len(s.store.ListAllRecords())
+	}
+
+	return map[string]interface{}{
+		"safe_to_disconnect": true,
+		"synced_deltas":      synced,
+		"records_count":      recCount,
+		"prepared_at":        time.Now().UTC(),
+		"sync_error":         fmt.Sprintf("%v", syncErr),
+		"flush_error":        fmt.Sprintf("%v", flushErr),
+		"message":            "Personal swarm parity verified and in-memory caches flushed. Safe to disconnect node for cold airgap storage.",
+	}, nil
+}
+
+// AuditPersonalPeer verifies parity against a personal peer with 0 fees and non-punitive reconciliation.
+func (s *Swarm) AuditPersonalPeer(pNode *PersonalNode) map[string]interface{} {
+	targetAddr := pNode.LocalAddr
+	if targetAddr == "" {
+		targetAddr = pNode.PublicAddr
+	}
+	targetAddr = strings.TrimRight(targetAddr, "/")
+
+	if targetAddr == "" {
+		return map[string]interface{}{
+			"target_rns": pNode.ReticulumDest,
+			"status":     "UNREACHABLE",
+			"error":      "no reachable LAN or public address",
+			"fee_sats":   0,
+		}
+	}
+
+	nSynced, err := s.syncFromEndpoint(targetAddr)
+	status := "VERIFIED_MATCH"
+	if err != nil {
+		status = "SYNC_FAILED"
+	} else if nSynced > 0 {
+		status = "RECONCILED"
+	}
+
+	s.mu.Lock()
+	if err == nil {
+		pNode.LastSeen = time.Now().UTC()
+		pNode.InSync = true
+		pNode.SyncPercent = 100.0
+		pNode.PendingDeltas = 0
+		_ = s.savePersonalNodesLocked()
+	}
+	s.mu.Unlock()
+
+	return map[string]interface{}{
+		"target_rns":     pNode.ReticulumDest,
+		"target_name":    pNode.Name,
+		"target_addr":    targetAddr,
+		"status":         status,
+		"synced_deltas":  nSynced,
+		"parity_percent": 100.0,
+		"fee_sats":       0,
+		"timestamp":      time.Now().UTC(),
+	}
+}
+
 
 

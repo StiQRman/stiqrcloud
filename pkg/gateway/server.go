@@ -73,17 +73,19 @@ func NewServer(cfg Config) *Server {
 	var pubHosts []string
 	for _, u := range []string{cfg.GatewayURL, cfg.PublicAddr} {
 		if u != "" {
+			var h string
 			parsed, err := url.Parse(u)
 			if err == nil && parsed.Hostname() != "" {
-				pubHosts = append(pubHosts, strings.ToLower(parsed.Hostname()))
+				h = strings.ToLower(parsed.Hostname())
 			} else {
-				h := strings.TrimPrefix(u, "http://")
+				h = strings.TrimPrefix(u, "http://")
 				h = strings.TrimPrefix(h, "https://")
 				h = strings.Split(h, "/")[0]
 				h = strings.Split(h, ":")[0]
-				if h != "" {
-					pubHosts = append(pubHosts, strings.ToLower(h))
-				}
+				h = strings.ToLower(strings.TrimSpace(h))
+			}
+			if h != "" && h != "localhost" && !isPrivateOrLoopbackIP(net.ParseIP(h)) && !strings.HasSuffix(h, ".local") && !strings.HasSuffix(h, ".lan") {
+				pubHosts = append(pubHosts, h)
 			}
 		}
 	}
@@ -250,6 +252,16 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/reticulum/send", s.localOnly(s.handleReticulumSend))
 	s.mux.HandleFunc("/api/reticulum/announce", s.localOnly(s.handleReticulumAnnounce))
 	s.mux.HandleFunc("/api/reticulum/status", s.handleReticulumStatus)
+
+	// Personal Swarm & Airgap API (Admin - Local Only)
+	s.mux.HandleFunc("/api/personal/nodes", s.localOnly(s.handlePersonalNodes))
+	s.mux.HandleFunc("/api/personal/nodes/", s.localOnly(s.handlePersonalNodeDelete))
+	s.mux.HandleFunc("/api/personal/manifest", s.handlePersonalManifest)
+	s.mux.HandleFunc("/api/personal/sync", s.localOnly(s.handlePersonalSync))
+	s.mux.HandleFunc("/api/personal/airgap/status", s.localOnly(s.handlePersonalAirgapStatus))
+	s.mux.HandleFunc("/api/personal/airgap/prep", s.localOnly(s.handlePersonalAirgapPrep))
+	s.mux.HandleFunc("/api/personal/storage-split", s.localOnly(s.handlePersonalStorageSplit))
+	s.mux.HandleFunc("/api/personal/audits/run", s.localOnly(s.handlePersonalAuditsRun))
 
 	if s.rnsManager != nil {
 		s.rnsManager.SetPacketHandler(func(p *reticulum.Packet, addr net.Addr) {
@@ -546,13 +558,20 @@ func (s *Server) handleSyncRecords(w http.ResponseWriter, r *http.Request) {
 	sinceStr := r.URL.Query().Get("since")
 	all := r.URL.Query().Get("all") == "true"
 
-	// Security: bulk dump with all=true or omitted peer_id is restricted to local administrative callers
-	if (all || peerID == "") && !s.isLocalRequest(r) {
+	isAllowedBulk := s.isLocalRequest(r)
+	if !isAllowedBulk && s.swarm != nil && peerID != "" {
+		if p, ok := s.swarm.GetPeer(peerID); ok && p.ReticulumDest != "" {
+			isAllowedBulk = s.swarm.IsPersonalPeer(p.ReticulumDest)
+		}
+	}
+
+	// Security: bulk dump with all=true or omitted peer_id is restricted to local callers or paired personal peers
+	if (all || peerID == "") && !isAllowedBulk {
 		http.Error(w, "Forbidden: bulk record sync is restricted to local requests or assigned peer identity", http.StatusForbidden)
 		return
 	}
 
-	limit := 200
+	limit := 5000
 	if lStr := r.URL.Query().Get("limit"); lStr != "" {
 		if parsed, err := strconv.Atoi(lStr); err == nil && parsed > 0 {
 			limit = parsed
@@ -594,7 +613,7 @@ func (s *Server) handleSyncRecords(w http.ResponseWriter, r *http.Request) {
 		}
 
 		isAssigned := false
-		if all || peerID == "" {
+		if all || peerID == "" || isAllowedBulk {
 			isAssigned = true
 		} else {
 			for _, sp := range rec.StoragePeers {
@@ -1010,6 +1029,14 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 	if s.escrowMgr != nil && s.escrowMgr.IsBlacklisted(userPubKey) {
 		http.Error(w, "Forbidden: public key or identity is blacklisted on this node", http.StatusForbidden)
 		return
+	}
+
+	if s.store != nil {
+		split := s.store.GetStorageSplit()
+		if !s.isLocalRequest(r) && !split.PublicEnabled {
+			http.Error(w, "Forbidden: node operator has disabled public mesh hosting (Personal Swarm Only)", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Security: Require cryptographic proof-of-possession signature when creating a record claiming an owner public key
@@ -2796,3 +2823,209 @@ Write-Host "=================================================================="
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(script))
 }
+
+func (s *Server) handlePersonalNodes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.swarm == nil {
+		http.Error(w, `{"error":"swarm not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		nodes := s.swarm.ListPersonalNodes()
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"nodes": nodes,
+			"total": len(nodes),
+		})
+
+	case http.MethodPost:
+		var body struct {
+			ReticulumDest string `json:"reticulum_dest"`
+			Name          string `json:"name"`
+			LocalAddr     string `json:"local_addr"`
+			PublicAddr    string `json:"public_addr"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ReticulumDest == "" {
+			http.Error(w, `{"error":"missing or invalid reticulum_dest"}`, http.StatusBadRequest)
+			return
+		}
+
+		pNode, err := s.swarm.AddPersonalNode(body.ReticulumDest, body.Name, body.LocalAddr, body.PublicAddr)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+
+		// Immediate background sync upon pairing new personal node
+		go func() {
+			_, _ = s.swarm.SyncPersonalRecords()
+		}()
+
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "added",
+			"node":   pNode,
+		})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handlePersonalNodeDelete(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.swarm == nil {
+		http.Error(w, `{"error":"swarm not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	dest := strings.TrimPrefix(r.URL.Path, "/api/personal/nodes/")
+	if dest == "" {
+		dest = r.URL.Query().Get("dest")
+	}
+	if dest == "" {
+		http.Error(w, `{"error":"missing destination"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.swarm.RemovePersonalNode(dest); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "removed",
+		"dest":    dest,
+		"message": "Node successfully removed from personal swarm.",
+	})
+}
+
+func (s *Server) handlePersonalManifest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.store == nil {
+		http.Error(w, `{"error":"store not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	records := s.store.ListAllRecords()
+	manifest := make(map[string]int64, len(records))
+	for _, rec := range records {
+		if rec != nil && rec.DataID != "" {
+			manifest[rec.DataID] = rec.Version
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"total":    len(manifest),
+		"manifest": manifest,
+	})
+}
+
+func (s *Server) handlePersonalSync(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.swarm == nil {
+		http.Error(w, `{"error":"swarm not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	synced, err := s.swarm.SyncPersonalRecords()
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        "completed",
+		"synced_deltas": synced,
+		"error":         errMsg,
+		"timestamp":     time.Now().UTC(),
+	})
+}
+
+func (s *Server) handlePersonalAirgapStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.swarm == nil {
+		http.Error(w, `{"error":"swarm not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	status := s.swarm.AirgapStatus()
+	_ = json.NewEncoder(w).Encode(status)
+}
+
+func (s *Server) handlePersonalAirgapPrep(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.swarm == nil {
+		http.Error(w, `{"error":"swarm not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	result, err := s.swarm.AirgapPrep()
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+func (s *Server) handlePersonalStorageSplit(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.store == nil {
+		http.Error(w, `{"error":"store not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		split := s.store.GetStorageSplit()
+		_ = json.NewEncoder(w).Encode(split)
+
+	case http.MethodPost:
+		var cfg storage.StorageSplitConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+			return
+		}
+
+		if err := s.store.SetStorageSplit(cfg); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		// Propagate identity updates to swarm and escrow if configured
+		if s.swarm != nil {
+			s.swarm.SetIdentity(s.rnsDest, cfg.PublicEnabled, cfg.PublicPriceSats)
+		}
+		if s.escrowMgr != nil {
+			policy := s.escrowMgr.GetPolicy()
+			policy.FreeForAll = (cfg.PublicPriceSats == 0)
+			policy.PricePerGBMonth = cfg.PublicPriceSats
+			_ = s.escrowMgr.UpdatePolicy(policy)
+		}
+
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":        "updated",
+			"storage_split": s.store.GetStorageSplit(),
+		})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handlePersonalAuditsRun(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.auditor == nil {
+		http.Error(w, `{"error":"auditor not initialized"}`, http.StatusInternalServerError)
+		return
+	}
+
+	results := s.auditor.ReconcilePersonalNodes()
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "audited",
+		"results": results,
+		"total":   len(results),
+	})
+}
+
