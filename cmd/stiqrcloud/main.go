@@ -44,6 +44,7 @@ func main() {
 	publicAddr := flag.String("public-addr", "", "Public reachable IP and port for P2P traffic")
 	gatewayURL := flag.String("gateway-url", "", "Public HTTP/HTTPS Gateway URL for mobile apps")
 	discoveryURL := flag.String("discovery-url", "", "Public internet discovery URL")
+	allowPublicDash := flag.Bool("allow-public-dashboard", false, "Expose node dashboard on public domain / WAN")
 	_ = flag.Int("p2p-port", 9100, "P2P swarm communication port")
 	flag.Parse()
 
@@ -163,8 +164,9 @@ func main() {
 		Auditor:    auditorCoord,
 		RNSManager: rnsManager,
 		RNSDest:    rnsDest,
-		IsPublic:   *isPublic,
-		Standalone: *standalone,
+		IsPublic:             *isPublic,
+		Standalone:           *standalone,
+		AllowPublicDashboard: *allowPublicDash,
 	})
 
 	server := &http.Server{

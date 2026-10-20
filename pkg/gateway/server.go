@@ -44,10 +44,11 @@ type Server struct {
 	rnsManager  *reticulum.InterfaceManager
 	rnsDest     string
 	isPublic    bool
-	standalone  bool
-	mux         *http.ServeMux
-	reconciling atomic.Bool
-	rateLimiter *IPRateLimiter
+	standalone      bool
+	allowPublicDash bool
+	mux             *http.ServeMux
+	reconciling     atomic.Bool
+	rateLimiter     *IPRateLimiter
 }
 
 // Config holds gateway server options.
@@ -62,10 +63,11 @@ type Config struct {
 	Swarm      *p2p.Swarm
 	EscrowMgr  *escrow.Manager
 	Auditor    *audit.Coordinator
-	RNSManager *reticulum.InterfaceManager
-	RNSDest    string
-	IsPublic   bool
-	Standalone bool
+	RNSManager           *reticulum.InterfaceManager
+	RNSDest              string
+	IsPublic             bool
+	Standalone           bool
+	AllowPublicDashboard bool
 }
 
 // NewServer builds the HTTP gateway server.
@@ -90,24 +92,27 @@ func NewServer(cfg Config) *Server {
 		}
 	}
 
+	allowPubDash := cfg.AllowPublicDashboard || os.Getenv("ALLOW_PUBLIC_DASHBOARD") == "true" || os.Getenv("STIQR_PUBLIC_DASHBOARD") == "true"
+
 	s := &Server{
-		nodeID:      cfg.NodeID,
-		name:        cfg.Name,
-		location:    cfg.Location,
-		publicIP:    cfg.PublicIP,
-		gatewayURL:  cfg.GatewayURL,
-		publicAddr:  cfg.PublicAddr,
-		publicHosts: pubHosts,
-		store:       cfg.Store,
-		swarm:       cfg.Swarm,
-		escrowMgr:   cfg.EscrowMgr,
-		auditor:     cfg.Auditor,
-		rnsManager:  cfg.RNSManager,
-		rnsDest:     cfg.RNSDest,
-		isPublic:    cfg.IsPublic,
-		standalone:  cfg.Standalone,
-		mux:         http.NewServeMux(),
-		rateLimiter: NewIPRateLimiter(120, 30, time.Minute),
+		nodeID:          cfg.NodeID,
+		name:            cfg.Name,
+		location:        cfg.Location,
+		publicIP:        cfg.PublicIP,
+		gatewayURL:      cfg.GatewayURL,
+		publicAddr:      cfg.PublicAddr,
+		publicHosts:     pubHosts,
+		store:           cfg.Store,
+		swarm:           cfg.Swarm,
+		escrowMgr:       cfg.EscrowMgr,
+		auditor:         cfg.Auditor,
+		rnsManager:      cfg.RNSManager,
+		rnsDest:         cfg.RNSDest,
+		isPublic:        cfg.IsPublic,
+		standalone:      cfg.Standalone,
+		allowPublicDash: allowPubDash,
+		mux:             http.NewServeMux(),
+		rateLimiter:     NewIPRateLimiter(120, 30, time.Minute),
 	}
 
 	// Wire contract checker for expired/unpaid data eviction
@@ -290,7 +295,7 @@ func (s *Server) setupRoutes() {
 	// Root redirect: local requests redirect to /dashboard; public WAN requests receive gateway metadata
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			if s.isLocalRequest(r) {
+			if s.isLocalRequest(r) || (s.allowPublicDash && strings.Contains(r.Header.Get("Accept"), "text/html")) {
 				http.Redirect(w, r, "/dashboard", http.StatusFound)
 				return
 			}
@@ -370,9 +375,14 @@ func isPrivateOrLoopbackIP(ip net.IP) bool {
 	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate()
 }
 
-// localOnly wraps a handler to enforce that only local LAN or localhost requests can access it.
+// localOnly wraps a handler to enforce that only local LAN or localhost requests can access it,
+// unless AllowPublicDashboard is explicitly configured.
 func (s *Server) localOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if s.allowPublicDash {
+			next(w, r)
+			return
+		}
 		if !s.isLocalRequest(r) {
 			if strings.Contains(r.Header.Get("Accept"), "text/html") || r.URL.Path == "/dashboard" {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
